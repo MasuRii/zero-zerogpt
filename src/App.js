@@ -1,12 +1,112 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   TextField, Container, Typography, Box, Grid, AppBar, Toolbar,
   CssBaseline, Button, Card, CardContent, IconButton, Snackbar,
-  useMediaQuery, Tooltip, Fade, Select, MenuItem, Chip
+  useMediaQuery, Tooltip, Fade, Select, MenuItem, Chip, ToggleButton, ToggleButtonGroup
 } from '@mui/material';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
-import { FileCopy as FileCopyIcon, Clear as ClearIcon, DarkMode, LightMode, Add as AddIcon } from '@mui/icons-material';
+import { FileCopy as FileCopyIcon, Clear as ClearIcon, DarkMode, LightMode, Add as AddIcon, TextFields, FormatColorText } from '@mui/icons-material';
 import { FaGithub } from 'react-icons/fa';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
+import './App.css';
+
+// Register fonts with Quill
+const Font = ReactQuill.Quill.import('formats/font');
+Font.whitelist = [
+  // Basic web fonts
+  'sans-serif',
+  'serif', 
+  'monospace',
+  
+  // Web Safe Fonts
+  'arial',
+  'arial-black',
+  'arial-narrow',
+  'comic-sans',
+  'courier',
+  'courier-new',
+  'georgia',
+  'helvetica',
+  'impact',
+  'lucida-console',
+  'lucida-sans',
+  'palatino',
+  'tahoma',
+  'times',
+  'times-new-roman',
+  'trebuchet-ms',
+  'verdana',
+  
+  // System Fonts
+  'calibri',
+  'cambria',
+  'consolas',
+  'franklin-gothic',
+  'segoe-ui',
+  'system-ui',
+  'microsoft-sans-serif',
+  'book-antiqua',
+  'century-gothic',
+  'lucida-grande',
+  'optima',
+  'futura',
+  'avenir',
+  'proxima-nova',
+  
+  // Google Fonts
+  'open-sans',
+  'roboto',
+  'lato',
+  'montserrat',
+  'source-sans-pro',
+  'raleway',
+  'pt-sans',
+  'ubuntu',
+  'nunito',
+  'poppins',
+  'oswald',
+  'merriweather',
+  'playfair-display',
+  'roboto-slab',
+  'lora',
+  'fira-sans',
+  'noto-sans',
+  'roboto-condensed',
+  'source-serif-pro',
+  'crimson-text',
+  'pt-serif',
+  'libre-baskerville',
+  'bitter',
+  'droid-sans',
+  'droid-serif',
+  
+  // Classic Typography
+  'garamond',
+  'baskerville',
+  'caslon',
+  'gill-sans',
+  'minion-pro',
+  'myriad-pro',
+  'adobe-garamond',
+  'bookman',
+  'avant-garde',
+  'copperplate',
+  'trajan',
+  'optima',
+  
+  // Monospace Fonts
+  'monaco',
+  'menlo',
+  'inconsolata',
+  'source-code-pro',
+  'fira-code',
+  'dejavu-sans-mono',
+  'liberation-mono',
+  'anonymous-pro',
+  'courier-prime'
+];
+ReactQuill.Quill.register(Font, true);
 
 const unicodeSpaces = {
   'Em Space': '\u2003',
@@ -40,6 +140,8 @@ const usageDescription = {
 
 const App = () => {
   const [inputText, setInputText] = useState('');
+  const [richText, setRichText] = useState('');
+  const [inputMode, setInputMode] = useState('rich');
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
@@ -138,9 +240,38 @@ const App = () => {
     setInputText(event.target.value);
   };
 
-  const replaceSpaces = (text, unicodeCharacter) => {
-    return text.split(' ').join(unicodeCharacter);
+  const handleRichTextChange = (content, delta, source, editor) => {
+    setRichText(content);
+    setInputText(editor.getText());
   };
+
+  const handleInputModeChange = (event, newMode) => {
+    if (newMode !== null) {
+      setInputMode(newMode);
+    }
+  };
+
+  const replaceSpaces = useCallback((text, unicodeCharacter) => {
+    return text.split(' ').join(unicodeCharacter);
+  }, []);
+
+  const replaceSpacesInHtml = useCallback((html, unicodeCharacter) => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    
+    const walkTextNodes = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        node.textContent = replaceSpaces(node.textContent, unicodeCharacter);
+      } else {
+        for (let child of node.childNodes) {
+          walkTextNodes(child);
+        }
+      }
+    };
+    
+    walkTextNodes(doc.body);
+    return doc.body.innerHTML;
+  }, [replaceSpaces]);
 
   const getUnicodeCode = (text) => {
     return text.split('').map((char) => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0').toUpperCase()).join('');
@@ -148,14 +279,24 @@ const App = () => {
 
   const handleClearText = () => {
     setInputText('');
+    setRichText('');
   };
 
-  const handleCopyText = (text, key) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setSnackbarMessage(`Copied text with ${key} spacing!`);
-      setSnackbarOpen(true);
-    });
-  };
+  const handleCopyText = useCallback((text, key, isHtml = false) => {
+    if (isHtml && inputMode === 'rich') {
+      const blob = new Blob([text], { type: 'text/html' });
+      const item = new ClipboardItem({ 'text/html': blob, 'text/plain': new Blob([inputText], { type: 'text/plain' }) });
+      navigator.clipboard.write([item]).then(() => {
+        setSnackbarMessage(`Copied formatted text with ${key} spacing!`);
+        setSnackbarOpen(true);
+      });
+    } else {
+      navigator.clipboard.writeText(text).then(() => {
+        setSnackbarMessage(`Copied text with ${key} spacing!`);
+        setSnackbarOpen(true);
+      });
+    }
+  }, [inputMode, inputText]);
 
   const handleCloseSnackbar = (event, reason) => {
     if (reason === 'clickaway') {
@@ -179,10 +320,15 @@ const App = () => {
     setCustomSpaces(customSpaces.filter(s => s !== space));
   };
 
-  const getCustomSpacingText = () => {
+  const getCustomSpacingText = useCallback(() => {
     const customSpacing = customSpaces.map(space => unicodeSpaces[space]).join('');
     return replaceSpaces(inputText, customSpacing);
-  };
+  }, [customSpaces, inputText, replaceSpaces]);
+
+  const getCustomSpacingHtml = useCallback(() => {
+    const customSpacing = customSpaces.map(space => unicodeSpaces[space]).join('');
+    return replaceSpacesInHtml(richText, customSpacing);
+  }, [customSpaces, richText, replaceSpacesInHtml]);
 
   return (
     <ThemeProvider theme={theme}>
@@ -220,25 +366,90 @@ const App = () => {
           <Typography variant="body1" align="center" paragraph>
             Enter text to experiment with the impact of unicode space types on AI detection tools.
           </Typography>
-          <TextField
-            label="Input Text"
-            variant="outlined"
-            multiline
-            minRows={12}
-            maxRows={14}
-            value={inputText}
-            onChange={handleInputChange}
-            margin="dense"
-            placeholder="Enter your text here..."
-            sx={{
-              width:"90%",
-              mx: "5%",
-              borderRadius: '6px',
-             '& .MuiOutlinedInput-root': {
-                backgroundColor: theme.palette.background.paper,
-              },
-            }}
-          />
+          
+          <Box display="flex" justifyContent="center" mb={2}>
+            <ToggleButtonGroup
+              value={inputMode}
+              exclusive
+              onChange={handleInputModeChange}
+              aria-label="input mode"
+            >
+              <ToggleButton value="plain" aria-label="plain text">
+                <TextFields sx={{ mr: 1 }} />
+                Plain Text
+              </ToggleButton>
+              <ToggleButton value="rich" aria-label="rich text">
+                <FormatColorText sx={{ mr: 1 }} />
+                Rich Text
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+
+          {inputMode === 'plain' ? (
+            <TextField
+              label="Input Text"
+              variant="outlined"
+              multiline
+              minRows={12}
+              maxRows={14}
+              value={inputText}
+              onChange={handleInputChange}
+              margin="dense"
+              placeholder="Enter your text here..."
+              sx={{
+                width:"90%",
+                mx: "5%",
+                borderRadius: '6px',
+               '& .MuiOutlinedInput-root': {
+                  backgroundColor: theme.palette.background.paper,
+                },
+              }}
+            />
+          ) : (
+            <Box sx={{ width: '90%', mx: '5%', mb: 2 }}>
+              <ReactQuill
+                theme="snow"
+                value={richText}
+                onChange={handleRichTextChange}
+                style={{
+                  backgroundColor: theme.palette.background.paper,
+                  borderRadius: '6px'
+                }}
+                modules={{
+                  toolbar: [
+                    [{ 'header': [1, 2, 3, false] }],
+                    [{ 'font': [
+                      'sans-serif', 'serif', 'monospace',
+                      'arial', 'arial-black', 'arial-narrow', 'comic-sans', 'courier', 'courier-new', 
+                      'georgia', 'helvetica', 'impact', 'lucida-console', 'lucida-sans', 'palatino', 
+                      'tahoma', 'times', 'times-new-roman', 'trebuchet-ms', 'verdana',
+                      'calibri', 'cambria', 'consolas', 'franklin-gothic', 'segoe-ui', 'system-ui', 
+                      'microsoft-sans-serif', 'book-antiqua', 'century-gothic', 'lucida-grande', 
+                      'optima', 'futura', 'avenir', 'proxima-nova',
+                      'open-sans', 'roboto', 'lato', 'montserrat', 'source-sans-pro', 'raleway', 
+                      'pt-sans', 'ubuntu', 'nunito', 'poppins', 'oswald', 'merriweather', 
+                      'playfair-display', 'roboto-slab', 'lora', 'fira-sans', 'noto-sans', 
+                      'roboto-condensed', 'source-serif-pro', 'crimson-text', 'pt-serif', 
+                      'libre-baskerville', 'bitter', 'droid-sans', 'droid-serif',
+                      'garamond', 'baskerville', 'caslon', 'gill-sans', 'minion-pro', 'myriad-pro', 
+                      'adobe-garamond', 'bookman', 'avant-garde', 'copperplate', 'trajan',
+                      'monaco', 'menlo', 'inconsolata', 'source-code-pro', 'fira-code', 
+                      'dejavu-sans-mono', 'liberation-mono', 'anonymous-pro', 'courier-prime'
+                    ] }],
+                    [{ 'size': ['small', false, 'large', 'huge'] }],
+                    ['bold', 'italic', 'underline', 'strike'],
+                    [{ 'color': [] }, { 'background': [] }],
+                    [{ 'align': [] }],
+                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                    [{ 'indent': '-1'}, { 'indent': '+1' }],
+                    ['blockquote', 'code-block'],
+                    ['link', 'image'],
+                    ['clean']
+                  ]
+                }}
+              />
+            </Box>
+          )}
           <Box display="flex" justifyContent="center" mb={6} mt={2}>
             <Button
               variant="contained"
@@ -263,26 +474,53 @@ const App = () => {
                         {getUnicodeCode(value)}
                       </Typography>
                     </Box>
-                    <TextField
-                      variant="outlined"
-                      fullWidth
-                      multiline
-                      minRows={1}
-                      maxRows={10}
-                      value={replaceSpaces(inputText, value)}
-                      InputProps={{
-                        readOnly: true,
-                      }}
-                      sx={{
-                        mb: 1,
-                        '& .MuiOutlinedInput-root': {
-                          backgroundColor: theme.palette.background.paper,
-                          '& fieldset': {
-                            borderColor: 'rgba(0, 0, 0, 0.12)',
+                    {inputMode === 'plain' ? (
+                      <TextField
+                        variant="outlined"
+                        fullWidth
+                        multiline
+                        minRows={1}
+                        maxRows={10}
+                        value={replaceSpaces(inputText, value)}
+                        InputProps={{
+                          readOnly: true,
+                        }}
+                        sx={{
+                          mb: 1,
+                          '& .MuiOutlinedInput-root': {
+                            backgroundColor: theme.palette.background.paper,
+                            '& fieldset': {
+                              borderColor: 'rgba(0, 0, 0, 0.12)',
+                            },
                           },
-                        },
-                      }}
-                    />
+                        }}
+                      />
+                    ) : (
+                      <Box
+                        className="quill-output"
+                        sx={{
+                          mb: 1,
+                          p: 1,
+                          border: '1px solid rgba(0, 0, 0, 0.12)',
+                          borderRadius: '4px',
+                          backgroundColor: theme.palette.background.paper,
+                          minHeight: '60px',
+                          maxHeight: '200px',
+                          overflowY: 'auto',
+                          '& p': { margin: '0 0 0.5em 0' },
+                          '& p:last-child': { marginBottom: 0 },
+                          '& ul, & ol': { paddingLeft: '1.5em', margin: '0.5em 0' },
+                          '& blockquote': { borderLeft: '4px solid #ccc', marginLeft: 0, paddingLeft: '1em' },
+                          '& pre': { background: '#f4f4f4', padding: '0.5em', borderRadius: '3px' },
+                          '& h1': { fontSize: '2em', margin: '0.5em 0' },
+                          '& h2': { fontSize: '1.5em', margin: '0.5em 0' },
+                          '& h3': { fontSize: '1.17em', margin: '0.5em 0' }
+                        }}
+                        dangerouslySetInnerHTML={{
+                          __html: replaceSpacesInHtml(richText, value)
+                        }}
+                      />
+                    )}
                     <Typography variant="body2" color="textSecondary" fontSize="0.75rem">
                       {usageDescription[key]}
                     </Typography>
@@ -291,7 +529,11 @@ const App = () => {
                         <IconButton
                           size="small"
                           color="primary"
-                          onClick={() => handleCopyText(replaceSpaces(inputText, value), key)}
+                          onClick={() => handleCopyText(
+                            inputMode === 'rich' ? replaceSpacesInHtml(richText, value) : replaceSpaces(inputText, value),
+                            key,
+                            inputMode === 'rich'
+                          )}
                         >
                           <FileCopyIcon fontSize="small" />
                         </IconButton>
@@ -340,23 +582,54 @@ const App = () => {
                   />
                 ))}
               </Box>
-              <TextField
-                variant="outlined"
-                fullWidth
-                multiline
-                minRows={10}
-                maxRows={12}
-                value={getCustomSpacingText()}
-                InputProps={{
-                  readOnly: true,
-                }}
-                sx={{ mb: 2 }}
-              />
+              {inputMode === 'plain' ? (
+                <TextField
+                  variant="outlined"
+                  fullWidth
+                  multiline
+                  minRows={10}
+                  maxRows={12}
+                  value={getCustomSpacingText()}
+                  InputProps={{
+                    readOnly: true,
+                  }}
+                  sx={{ mb: 2 }}
+                />
+              ) : (
+                <Box
+                  className="quill-output"
+                  sx={{
+                    mb: 2,
+                    p: 2,
+                    border: '1px solid rgba(0, 0, 0, 0.23)',
+                    borderRadius: '4px',
+                    backgroundColor: theme.palette.background.paper,
+                    minHeight: '250px',
+                    maxHeight: '300px',
+                    overflowY: 'auto',
+                    '& p': { margin: '0 0 0.5em 0' },
+                    '& p:last-child': { marginBottom: 0 },
+                    '& ul, & ol': { paddingLeft: '1.5em', margin: '0.5em 0' },
+                    '& blockquote': { borderLeft: '4px solid #ccc', marginLeft: 0, paddingLeft: '1em' },
+                    '& pre': { background: '#f4f4f4', padding: '0.5em', borderRadius: '3px' },
+                    '& h1': { fontSize: '2em', margin: '0.5em 0' },
+                    '& h2': { fontSize: '1.5em', margin: '0.5em 0' },
+                    '& h3': { fontSize: '1.17em', margin: '0.5em 0' }
+                  }}
+                  dangerouslySetInnerHTML={{
+                    __html: getCustomSpacingHtml()
+                  }}
+                />
+              )}
               <Box display="flex" justifyContent="flex-end">
                 <Tooltip title="Copy custom spaced text">
                   <IconButton
                     color="primary"
-                    onClick={() => handleCopyText(getCustomSpacingText(), 'Custom')}
+                    onClick={() => handleCopyText(
+                      inputMode === 'rich' ? getCustomSpacingHtml() : getCustomSpacingText(),
+                      'Custom',
+                      inputMode === 'rich'
+                    )}
                   >
                     <FileCopyIcon />
                   </IconButton>
