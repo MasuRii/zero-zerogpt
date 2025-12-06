@@ -2,14 +2,20 @@ import React, { useState, useMemo, useCallback } from 'react';
 import {
   TextField, Container, Typography, Box, Grid, AppBar, Toolbar,
   CssBaseline, Button, Card, CardContent, IconButton, Snackbar,
-  useMediaQuery, Tooltip, Fade, Select, MenuItem, Chip, ToggleButton, ToggleButtonGroup
+  useMediaQuery, Tooltip, Fade, Select, MenuItem, Chip, ToggleButton, ToggleButtonGroup,
+  CircularProgress
 } from '@mui/material';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
-import { FileCopy as FileCopyIcon, Clear as ClearIcon, DarkMode, LightMode, Add as AddIcon, TextFields, FormatColorText } from '@mui/icons-material';
+import { FileCopy as FileCopyIcon, Clear as ClearIcon, DarkMode, LightMode, Add as AddIcon, TextFields, FormatColorText, PictureAsPdf, Download as DownloadIcon } from '@mui/icons-material';
 import { FaGithub } from 'react-icons/fa';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import './App.css';
+
+// PDF handling imports
+import { usePdfHandler } from './hooks/usePdfHandler';
+import { usePdfGenerator } from './hooks/usePdfGenerator';
+import PdfUploader from './components/PdfUploader';
 
 // Register fonts with Quill
 const Font = ReactQuill.Quill.import('formats/font');
@@ -148,6 +154,19 @@ const App = () => {
   const [mode, setMode] = useState(prefersDarkMode ? 'dark' : 'light');
   const [customSpaces, setCustomSpaces] = useState([]);
   const [selectedSpace, setSelectedSpace] = useState('');
+  
+  // PDF state
+  const [pdfFileName, setPdfFileName] = useState('');
+
+  // Initialize PDF hooks
+  const {
+    clearPdf
+  } = usePdfHandler();
+
+  const {
+    isGenerating,
+    generateAndDownloadPdf
+  } = usePdfGenerator();
 
   const theme = useMemo(
     () =>
@@ -280,7 +299,43 @@ const App = () => {
   const handleClearText = () => {
     setInputText('');
     setRichText('');
+    setPdfFileName('');
+    clearPdf();
   };
+
+  // PDF text extraction callback
+  const handlePdfTextExtracted = useCallback((text, fileName, pages) => {
+    setInputText(text);
+    setPdfFileName(fileName);
+    if (text) {
+      setSnackbarMessage(`Extracted text from ${fileName} (${pages} page${pages !== 1 ? 's' : ''})`);
+      setSnackbarOpen(true);
+    }
+  }, []);
+
+  // PDF extraction error callback
+  const handlePdfError = useCallback((error) => {
+    setSnackbarMessage(`PDF Error: ${error.message}`);
+    setSnackbarOpen(true);
+  }, []);
+
+  // PDF download handler
+  const handleDownloadPdf = useCallback(async (unicodeCharacter, spaceName) => {
+    const transformedText = replaceSpaces(inputText, unicodeCharacter);
+    const baseName = pdfFileName
+      ? pdfFileName.replace(/\.pdf$/i, '')
+      : 'transformed';
+    const outputFileName = `${baseName}_${spaceName.replace(/\s+/g, '_')}.pdf`;
+    
+    try {
+      await generateAndDownloadPdf(transformedText, outputFileName);
+      setSnackbarMessage(`Downloaded PDF with ${spaceName} spacing!`);
+      setSnackbarOpen(true);
+    } catch (err) {
+      setSnackbarMessage(`Error generating PDF: ${err.message}`);
+      setSnackbarOpen(true);
+    }
+  }, [inputText, pdfFileName, replaceSpaces, generateAndDownloadPdf]);
 
   const handleCopyText = useCallback((text, key, isHtml = false) => {
     if (isHtml && inputMode === 'rich') {
@@ -382,6 +437,10 @@ const App = () => {
                 <FormatColorText sx={{ mr: 1 }} />
                 Rich Text
               </ToggleButton>
+              <ToggleButton value="pdf" aria-label="pdf upload">
+                <PictureAsPdf sx={{ mr: 1 }} />
+                PDF
+              </ToggleButton>
             </ToggleButtonGroup>
           </Box>
 
@@ -405,7 +464,7 @@ const App = () => {
                 },
               }}
             />
-          ) : (
+          ) : inputMode === 'rich' ? (
             <Box sx={{ width: '90%', mx: '5%', mb: 2 }}>
               <ReactQuill
                 theme="snow"
@@ -420,20 +479,20 @@ const App = () => {
                     [{ 'header': [1, 2, 3, false] }],
                     [{ 'font': [
                       'sans-serif', 'serif', 'monospace',
-                      'arial', 'arial-black', 'arial-narrow', 'comic-sans', 'courier', 'courier-new', 
-                      'georgia', 'helvetica', 'impact', 'lucida-console', 'lucida-sans', 'palatino', 
+                      'arial', 'arial-black', 'arial-narrow', 'comic-sans', 'courier', 'courier-new',
+                      'georgia', 'helvetica', 'impact', 'lucida-console', 'lucida-sans', 'palatino',
                       'tahoma', 'times', 'times-new-roman', 'trebuchet-ms', 'verdana',
-                      'calibri', 'cambria', 'consolas', 'franklin-gothic', 'segoe-ui', 'system-ui', 
-                      'microsoft-sans-serif', 'book-antiqua', 'century-gothic', 'lucida-grande', 
+                      'calibri', 'cambria', 'consolas', 'franklin-gothic', 'segoe-ui', 'system-ui',
+                      'microsoft-sans-serif', 'book-antiqua', 'century-gothic', 'lucida-grande',
                       'optima', 'futura', 'avenir', 'proxima-nova',
-                      'open-sans', 'roboto', 'lato', 'montserrat', 'source-sans-pro', 'raleway', 
-                      'pt-sans', 'ubuntu', 'nunito', 'poppins', 'oswald', 'merriweather', 
-                      'playfair-display', 'roboto-slab', 'lora', 'fira-sans', 'noto-sans', 
-                      'roboto-condensed', 'source-serif-pro', 'crimson-text', 'pt-serif', 
+                      'open-sans', 'roboto', 'lato', 'montserrat', 'source-sans-pro', 'raleway',
+                      'pt-sans', 'ubuntu', 'nunito', 'poppins', 'oswald', 'merriweather',
+                      'playfair-display', 'roboto-slab', 'lora', 'fira-sans', 'noto-sans',
+                      'roboto-condensed', 'source-serif-pro', 'crimson-text', 'pt-serif',
                       'libre-baskerville', 'bitter', 'droid-sans', 'droid-serif',
-                      'garamond', 'baskerville', 'caslon', 'gill-sans', 'minion-pro', 'myriad-pro', 
+                      'garamond', 'baskerville', 'caslon', 'gill-sans', 'minion-pro', 'myriad-pro',
                       'adobe-garamond', 'bookman', 'avant-garde', 'copperplate', 'trajan',
-                      'monaco', 'menlo', 'inconsolata', 'source-code-pro', 'fira-code', 
+                      'monaco', 'menlo', 'inconsolata', 'source-code-pro', 'fira-code',
                       'dejavu-sans-mono', 'liberation-mono', 'anonymous-pro', 'courier-prime'
                     ] }],
                     [{ 'size': ['small', false, 'large', 'huge'] }],
@@ -449,6 +508,12 @@ const App = () => {
                 }}
               />
             </Box>
+          ) : (
+            <PdfUploader
+              onTextExtracted={handlePdfTextExtracted}
+              onError={handlePdfError}
+              theme={theme}
+            />
           )}
           <Box display="flex" justifyContent="center" mb={6} mt={2}>
             <Button
@@ -524,7 +589,7 @@ const App = () => {
                     <Typography variant="body2" color="textSecondary" fontSize="0.75rem">
                       {usageDescription[key]}
                     </Typography>
-                    <Box display="flex" justifyContent="flex-end" mt={1}>
+                    <Box display="flex" justifyContent="flex-end" mt={1} gap={0.5}>
                       <Tooltip title={`Copy text with ${key} spacing`}>
                         <IconButton
                           size="small"
@@ -538,6 +603,24 @@ const App = () => {
                           <FileCopyIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
+                      {inputMode === 'pdf' && inputText && (
+                        <Tooltip title={`Download PDF with ${key} spacing`}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              color="secondary"
+                              onClick={() => handleDownloadPdf(value, key)}
+                              disabled={isGenerating}
+                            >
+                              {isGenerating ? (
+                                <CircularProgress size={18} />
+                              ) : (
+                                <DownloadIcon fontSize="small" />
+                              )}
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      )}
                     </Box>
                   </CardContent>
                 </Card>
@@ -621,7 +704,7 @@ const App = () => {
                   }}
                 />
               )}
-              <Box display="flex" justifyContent="flex-end">
+              <Box display="flex" justifyContent="flex-end" gap={0.5}>
                 <Tooltip title="Copy custom spaced text">
                   <IconButton
                     color="primary"
@@ -634,6 +717,26 @@ const App = () => {
                     <FileCopyIcon />
                   </IconButton>
                 </Tooltip>
+                {inputMode === 'pdf' && inputText && (
+                  <Tooltip title="Download PDF with custom spacing">
+                    <span>
+                      <IconButton
+                        color="secondary"
+                        onClick={() => {
+                          const customSpacing = customSpaces.map(space => unicodeSpaces[space]).join('');
+                          handleDownloadPdf(customSpacing, 'Custom');
+                        }}
+                        disabled={isGenerating || customSpaces.length === 0}
+                      >
+                        {isGenerating ? (
+                          <CircularProgress size={24} />
+                        ) : (
+                          <DownloadIcon />
+                        )}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                )}
               </Box>
             </CardContent>
           </Card>

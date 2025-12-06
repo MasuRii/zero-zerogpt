@@ -9,6 +9,7 @@
 - [Live Demo](#live-demo)
 - [AI Detection Approach](#ai-detection-approach)
 - [Unicode Spacing Technique](#unicode-spacing-technique)
+- [PDF Support](#pdf-support)
 - [Examples](#examples)
 - [Installation and Usage](#installation-and-usage)
 - [Contributing](#contributing)
@@ -38,6 +39,18 @@ AI detection tools generally tokenize text based on standard spaces. By replacin
 1. **Tokenization Disruption**: Many detection models split text into tokens based on spaces. When Unicode spaces are used, these tools fail to recognize them as standard spaces.
 2. **Statistical Alteration**: The statistical features of the text are changed when spaces are replaced with Unicode spaces, preventing the model from matching the text with its learned patterns.
 3. **Pattern Interference**: Unicode spaces can disrupt the detection model's ability to identify typical text patterns.
+
+## PDF Support
+
+Zero-ZeroGPT includes comprehensive PDF processing capabilities, powered by **pdfjs-dist** for text extraction and **jspdf** for document generation.
+
+**Features:**
+*   **Text Extraction**: Upload a PDF to automatically extract its text content.
+*   **Seamless Transformation**: Apply any Unicode spacing pattern to the extracted text.
+*   **PDF Generation**: Download the transformed text as a new PDF file, preserving the original filename structure (e.g., `original_Em_Space.pdf`).
+
+**Limitations:**
+*   **Text-Based Only**: The feature currently supports text-based PDFs. Scanned documents or image-only PDFs are not supported as they require OCR.
 
 ## Examples
 
@@ -79,10 +92,15 @@ Here are some visual examples demonstrating the effect of Unicode spacing on AI 
 
 ### Usage Instructions
 
-1. Enter your text in the input field.
-2. Experiment with different Unicode spaces using the predefined options or create your own combination.
-3. Copy the modified text and test it in various AI detection tools.
-4. Use the "Clear Text" button to reset the input field.
+1. **Select Input Mode**: Choose between "Plain Text", "Rich Text", or "PDF" using the toggle buttons.
+2. **Input Content**:
+   *   **Plain/Rich Text**: Enter or paste your text in the input field.
+   *   **PDF**: Click the "PDF" mode button, then drag & drop a file or click to upload.
+3. **Apply Spacing**: Experiment with different Unicode spaces using the preview cards or create your own combination.
+4. **Export Results**:
+   *   **Copy**: Click the copy icon on any card to copy the modified text.
+   *   **Download (PDF Mode)**: When in PDF mode, click the download icon on any spacing card to generate a new PDF with that specific Unicode spacing applied.
+5.  Use the "Clear Text" button to reset the application and clear any uploaded files.
 
 ## Contributing
 
