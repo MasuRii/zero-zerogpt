@@ -6,7 +6,7 @@ import {
   CircularProgress
 } from '@mui/material';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
-import { FileCopy as FileCopyIcon, Clear as ClearIcon, DarkMode, LightMode, Add as AddIcon, TextFields, FormatColorText, PictureAsPdf, Download as DownloadIcon } from '@mui/icons-material';
+import { FileCopy as FileCopyIcon, Clear as ClearIcon, DarkMode, LightMode, Add as AddIcon, TextFields, FormatColorText, PictureAsPdf, Download as DownloadIcon, Description as MarkdownIcon } from '@mui/icons-material';
 import { FaGithub } from 'react-icons/fa';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
@@ -16,6 +16,10 @@ import './App.css';
 import { usePdfHandler } from './hooks/usePdfHandler';
 import { usePdfGenerator } from './hooks/usePdfGenerator';
 import PdfUploader from './components/PdfUploader';
+
+// Markdown handling imports
+import MarkdownUploader from './components/MarkdownUploader';
+import { useMarkdownGenerator } from './hooks/useMarkdownGenerator';
 
 // Register fonts with Quill
 const Font = ReactQuill.Quill.import('formats/font');
@@ -160,16 +164,29 @@ const App = () => {
   const [enhancedPdfData, setEnhancedPdfData] = useState(null);
   const [isLayoutPreserved, setIsLayoutPreserved] = useState(false);
 
+  // Markdown state
+  const [markdownFileName, setMarkdownFileName] = useState('');
+  const [originalMarkdownText, setOriginalMarkdownText] = useState('');
+
   // Initialize PDF hooks
   const {
     clearPdf
   } = usePdfHandler();
 
   const {
-    isGenerating,
+    isGenerating: isPdfGenerating,
     generateAndDownloadPdf,
     generateAndDownloadPdfWithLayout
   } = usePdfGenerator();
+
+  // Initialize Markdown hooks
+  const {
+    isGenerating: isMarkdownGenerating,
+    generateMarkdown
+  } = useMarkdownGenerator();
+
+  // Combined generating state
+  const isGenerating = isPdfGenerating || isMarkdownGenerating;
 
   const theme = useMemo(
     () =>
@@ -305,8 +322,42 @@ const App = () => {
     setPdfFileName('');
     setEnhancedPdfData(null);
     setIsLayoutPreserved(false);
+    setMarkdownFileName('');
+    setOriginalMarkdownText('');
     clearPdf();
   };
+
+  // Markdown text extraction callback
+  const handleMarkdownTextExtracted = useCallback((text, fileName) => {
+    if (text) {
+      setInputText(text);
+      setOriginalMarkdownText(text);
+      setMarkdownFileName(fileName || '');
+      setSnackbarMessage(`Extracted text from ${fileName || 'Markdown file'} (${text.length.toLocaleString()} characters)`);
+      setSnackbarOpen(true);
+    } else {
+      setOriginalMarkdownText('');
+      setMarkdownFileName('');
+    }
+  }, []);
+
+  // Markdown download handler - uses AST-based transformation
+  const handleDownloadMarkdown = useCallback(async (unicodeCharacter, spaceName) => {
+    try {
+      const baseName = markdownFileName
+        ? markdownFileName.replace(/\.(md|markdown)$/i, '')
+        : 'transformed';
+      const outputFileName = `${baseName}_${spaceName.replace(/\s+/g, '_')}.md`;
+      
+      await generateMarkdown(originalMarkdownText, unicodeCharacter, outputFileName);
+      
+      setSnackbarMessage(`Downloaded Markdown with ${spaceName} spacing!`);
+      setSnackbarOpen(true);
+    } catch (err) {
+      setSnackbarMessage(`Error generating Markdown: ${err.message}`);
+      setSnackbarOpen(true);
+    }
+  }, [originalMarkdownText, markdownFileName, generateMarkdown]);
 
   // PDF text extraction callback - now supports layout preservation
   const handlePdfTextExtracted = useCallback((text, fileName, pages, pdfData = null, layoutPreserved = false) => {
@@ -466,6 +517,10 @@ const App = () => {
                 <PictureAsPdf sx={{ mr: 1 }} />
                 PDF
               </ToggleButton>
+              <ToggleButton value="markdown" aria-label="markdown upload">
+                <MarkdownIcon sx={{ mr: 1 }} />
+                Markdown
+              </ToggleButton>
             </ToggleButtonGroup>
           </Box>
 
@@ -533,10 +588,15 @@ const App = () => {
                 }}
               />
             </Box>
-          ) : (
+          ) : inputMode === 'pdf' ? (
             <PdfUploader
               onTextExtracted={handlePdfTextExtracted}
               onError={handlePdfError}
+              theme={theme}
+            />
+          ) : (
+            <MarkdownUploader
+              onTextExtracted={handleMarkdownTextExtracted}
               theme={theme}
             />
           )}
@@ -615,38 +675,56 @@ const App = () => {
                       {usageDescription[key]}
                     </Typography>
                     <Box display="flex" justifyContent="flex-end" mt={1} gap={0.5}>
-                      <Tooltip title={`Copy text with ${key} spacing`}>
-                        <IconButton
-                          size="small"
-                          color="primary"
-                          onClick={() => handleCopyText(
-                            inputMode === 'rich' ? replaceSpacesInHtml(richText, value) : replaceSpaces(inputText, value),
-                            key,
-                            inputMode === 'rich'
-                          )}
-                        >
-                          <FileCopyIcon fontSize="small" />
-                        </IconButton>
+                    <Tooltip title={`Copy text with ${key} spacing`}>
+                      <IconButton
+                        size="small"
+                        color="primary"
+                        onClick={() => handleCopyText(
+                          inputMode === 'rich' ? replaceSpacesInHtml(richText, value) : replaceSpaces(inputText, value),
+                          key,
+                          inputMode === 'rich'
+                        )}
+                      >
+                        <FileCopyIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    {inputMode === 'pdf' && inputText && (
+                      <Tooltip title={`Download PDF with ${key} spacing`}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="secondary"
+                            onClick={() => handleDownloadPdf(value, key)}
+                            disabled={isGenerating}
+                          >
+                            {isGenerating ? (
+                              <CircularProgress size={18} />
+                            ) : (
+                              <DownloadIcon fontSize="small" />
+                            )}
+                          </IconButton>
+                        </span>
                       </Tooltip>
-                      {inputMode === 'pdf' && inputText && (
-                        <Tooltip title={`Download PDF with ${key} spacing`}>
-                          <span>
-                            <IconButton
-                              size="small"
-                              color="secondary"
-                              onClick={() => handleDownloadPdf(value, key)}
-                              disabled={isGenerating}
-                            >
-                              {isGenerating ? (
-                                <CircularProgress size={18} />
-                              ) : (
-                                <DownloadIcon fontSize="small" />
-                              )}
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      )}
-                    </Box>
+                    )}
+                    {inputMode === 'markdown' && originalMarkdownText && (
+                      <Tooltip title={`Download Markdown with ${key} spacing`}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="secondary"
+                            onClick={() => handleDownloadMarkdown(value, key)}
+                            disabled={isGenerating}
+                          >
+                            {isGenerating ? (
+                              <CircularProgress size={18} />
+                            ) : (
+                              <DownloadIcon fontSize="small" />
+                            )}
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
+                  </Box>
                   </CardContent>
                 </Card>
               </Grid>
@@ -750,6 +828,26 @@ const App = () => {
                         onClick={() => {
                           const customSpacing = customSpaces.map(space => unicodeSpaces[space]).join('');
                           handleDownloadPdf(customSpacing, 'Custom');
+                        }}
+                        disabled={isGenerating || customSpaces.length === 0}
+                      >
+                        {isGenerating ? (
+                          <CircularProgress size={24} />
+                        ) : (
+                          <DownloadIcon />
+                        )}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                )}
+                {inputMode === 'markdown' && originalMarkdownText && (
+                  <Tooltip title="Download Markdown with custom spacing">
+                    <span>
+                      <IconButton
+                        color="secondary"
+                        onClick={() => {
+                          const customSpacing = customSpaces.map(space => unicodeSpaces[space]).join('');
+                          handleDownloadMarkdown(customSpacing, 'Custom');
                         }}
                         disabled={isGenerating || customSpaces.length === 0}
                       >
