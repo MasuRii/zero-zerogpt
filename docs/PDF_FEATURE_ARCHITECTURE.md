@@ -131,32 +131,33 @@ const unicodeSpaces = {
 - Active development and security updates
 - Already used by Firefox for native PDF viewing
 
-### 2.2 PDF Generation: `jspdf`
+### 2.2 PDF Generation: `pdf-lib` (Replaced `jspdf`)
 
-**Selected Version**: `^2.5.1` (latest stable)
+**Selected Version**: `^1.17.1`
 
-**Justification**:
-| Criteria | jspdf | pdf-lib | pdfmake |
-|----------|-------|---------|---------|
-| PDF Creation | ✅ Simple API | ✅ Complex API | ✅ Declarative |
-| Unicode Support | ✅ With custom fonts | ✅ Native | ✅ Native |
-| Bundle Size | ~300KB | ~300KB | ~800KB |
-| Learning Curve | Low | Medium | Medium |
-| Font Embedding | ✅ Supported | ✅ Supported | ✅ Supported |
+**Justification for Switch**:
+While `jspdf` was sufficient for simple text generation, the requirement for **Font Preservation** and **Layout Maintenance** necessitated a library with deeper PDF structure manipulation capabilities.
 
-**Why `jspdf`**:
-- Simplest API for our use case (text-based PDFs)
-- Good Unicode character support with custom fonts
-- Well-documented with extensive examples
-- Lightweight and focused on PDF creation
-- Large community and ecosystem
+| Criteria | jspdf | pdf-lib |
+|----------|-------|---------|
+| **Font Embedding** | Limited (Custom fonts only) | ✅ Excellent (Standard + Custom + Subsetting) |
+| **Layout Control** | Basic Flow | ✅ Precise (x, y positioning) |
+| **Existing PDF Mod** | ❌ No | ✅ Yes (Merge/Embed pages) |
+| **Unicode** | Requires manual font handling | ✅ Native via fontkit |
+
+**Why `pdf-lib`**:
+- **Precise Positioning**: Essential for reproducing the exact layout of the source PDF.
+- **Font Subsetting**: Allows embedding only used glyphs to keep file size low.
+- **Structural Access**: Enables measuring text width/height accurately for layout calculations.
 
 ### 2.3 Additional Dependencies
 
 ```json
 {
-  "pdfjs-dist": "^4.0.379",
-  "jspdf": "^2.5.1"
+  "pdfjs-dist": "^5.4.449",
+  "jspdf": "^3.0.4",
+  "pdf-lib": "^1.17.1",
+  "@pdf-lib/fontkit": "^1.1.1"
 }
 ```
 
@@ -177,10 +178,10 @@ flowchart TB
     end
     
     subgraph Processing Layer
-        C --> D[usePdfProcessor Hook]
-        D --> E[pdfjs-dist: Extract Text]
+        C --> D[usePdfHandler Hook]
+        D --> E[pdfjs-dist: Extract Layout+Text]
         E --> F[replaceSpaces: Transform]
-        F --> G[jspdf: Generate PDF]
+        F --> G[pdf-lib: Generate Preserved PDF]
     end
     
     subgraph Output Layer
@@ -206,28 +207,36 @@ flowchart TB
 sequenceDiagram
     participant User
     participant PdfUploader
-    participant usePdfProcessor
-    participant pdfjs as pdfjs-dist
-    participant replaceSpaces
-    participant jspdf
+    participant usePdfHandler
+    participant PDFjs as PDF.js
+    participant usePdfGenerator
+    participant pdflib as pdf-lib
     
-    User->>PdfUploader: Upload PDF file
-    PdfUploader->>usePdfProcessor: Process file
-    usePdfProcessor->>pdfjs: Load PDF document
-    pdfjs-->>usePdfProcessor: PDF object
+    User->>PdfUploader: Upload PDF
+    PdfUploader->>usePdfHandler: Process file
+    usePdfHandler->>PDFjs: Load document
+    PDFjs-->>usePdfHandler: PDF object
     
     loop For each page
-        usePdfProcessor->>pdfjs: getTextContent()
-        pdfjs-->>usePdfProcessor: Text items array
+        usePdfHandler->>PDFjs: getTextContent
+        PDFjs-->>usePdfHandler: TextContent with positions
+        usePdfHandler->>PDFjs: getViewport
+        PDFjs-->>usePdfHandler: Page dimensions
     end
     
-    usePdfProcessor-->>PdfUploader: Extracted plain text
+    usePdfHandler-->>PdfUploader: EnhancedPdfData (Text + Layout)
     
-    User->>PdfUploader: Click Download (with space type)
-    PdfUploader->>replaceSpaces: Transform text
-    replaceSpaces-->>PdfUploader: Modified text
-    PdfUploader->>jspdf: Create PDF with modified text
-    jspdf-->>User: Download PDF file
+    User->>PdfUploader: Select space type & Download
+    PdfUploader->>usePdfGenerator: Generate with layout options
+    usePdfGenerator->>pdflib: Create document
+    usePdfGenerator->>pdflib: Embed fonts (Standard/Fallback)
+    
+    loop For each text item
+        usePdfGenerator->>pdflib: Draw text at original (x,y)
+    end
+    
+    pdflib-->>usePdfGenerator: PDF bytes
+    usePdfGenerator-->>User: Download PDF
 ```
 
 ### 3.3 Component Hierarchy
@@ -344,13 +353,13 @@ const PdfUploader = ({ onTextExtracted, theme }) => {
 export default PdfUploader;
 ```
 
-#### 4.1.2 `usePdfProcessor.js` (Custom Hook)
+#### 4.1.2 `usePdfHandler.js` (Custom Hook)
 
-**Purpose**: Encapsulate PDF.js text extraction logic
+**Purpose**: Encapsulate PDF.js text extraction logic with layout preservation
 
 **Implementation Sketch**:
 ```javascript
-// src/hooks/usePdfProcessor.js
+// src/hooks/usePdfHandler.js
 import { useState, useCallback } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 
@@ -974,6 +983,28 @@ if (text.trim().length < 10) {
 | Edge | 90+ | Supported |
 | Mobile Chrome | Latest | Supported |
 | Mobile Safari | Latest | Supported |
+
+---
+
+## 11. Evolution: Font Preservation & Layout Maintenance
+
+### 11.1 Feature Overview
+The PDF feature has been evolved to support **Font Preservation** and **Page Layout Maintenance**. This enhancement allows the application to generate PDFs that closely mirror the visual structure of the uploaded original, rather than just extracting plain text.
+
+**Key Capabilities:**
+- **Layout Preservation**: Extracts and utilizes x, y coordinates, page dimensions, and text transformations to reproduce the original document structure.
+- **Font Awareness**: Detects original fonts and maps them to standard PDF fonts or high-quality fallbacks (StandardFonts family) to maintain visual consistency.
+- **Hybrid Generation**: Uses `pdf-lib` for high-fidelity generation while retaining `pdfjs-dist` for accurate extraction.
+
+### 11.2 Architecture Extensions
+For a detailed deep-dive into the technical implementation of this feature, refer to [`docs/PDF_FONT_LAYOUT_ARCHITECTURE.md`](PDF_FONT_LAYOUT_ARCHITECTURE.md).
+
+**New Utilities:**
+- **`src/utils/pdfTypes.js`**: Defines comprehensive data structures for `EnhancedPdfData`, `TextItem`, `PageLayout`, and `FontInfo`.
+- **`src/utils/fontManager.js`**: Handles font detection, style mapping, and fallback resolution strategies.
+
+**Bundle Size Impact:**
+The addition of `pdf-lib` and `@pdf-lib/fontkit` adds approximately **~250KB** to the bundle size. This is a calculated trade-off for the significant improvement in output quality and feature capability.
 
 ---
 

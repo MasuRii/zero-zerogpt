@@ -42,15 +42,19 @@ AI detection tools generally tokenize text based on standard spaces. By replacin
 
 ## PDF Support
 
-Zero-ZeroGPT includes comprehensive PDF processing capabilities, powered by **pdfjs-dist** for text extraction and **jspdf** for document generation.
+Zero-ZeroGPT includes comprehensive PDF processing capabilities, powered by **pdfjs-dist** for extraction and **pdf-lib** for high-fidelity generation.
 
 **Features:**
-*   **Text Extraction**: Upload a PDF to automatically extract its text content.
-*   **Seamless Transformation**: Apply any Unicode spacing pattern to the extracted text.
-*   **PDF Generation**: Download the transformed text as a new PDF file, preserving the original filename structure (e.g., `original_Em_Space.pdf`).
+*   **Layout Preservation**: Maintains the original document's structure, including text positioning, columns, and page dimensions.
+*   **Font Awareness**: Intelligently maps original fonts to standard PDF fonts or compatible fallbacks to preserve the document's visual style.
+*   **Seamless Transformation**: Apply any Unicode spacing pattern to the text while keeping the document layout intact.
+*   **Hybrid Generation**:
+    *   **Layout Preserved Mode**: Generates a PDF that mirrors the input (default).
+    *   **Simple Text Mode**: Generates a clean, simple text document (fallback).
 
 **Limitations:**
-*   **Text-Based Only**: The feature currently supports text-based PDFs. Scanned documents or image-only PDFs are not supported as they require OCR.
+*   **Text-Based Only**: The feature supports text-based PDFs. Scanned documents or image-only PDFs are not supported (OCR is not implemented).
+*   **Font Subsetting**: While font families and styles are preserved, exact custom font files are not re-embedded to avoid copyright and size issues; high-quality standard fallbacks are used instead.
 
 ## Examples
 

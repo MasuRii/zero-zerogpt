@@ -157,6 +157,8 @@ const App = () => {
   
   // PDF state
   const [pdfFileName, setPdfFileName] = useState('');
+  const [enhancedPdfData, setEnhancedPdfData] = useState(null);
+  const [isLayoutPreserved, setIsLayoutPreserved] = useState(false);
 
   // Initialize PDF hooks
   const {
@@ -165,7 +167,8 @@ const App = () => {
 
   const {
     isGenerating,
-    generateAndDownloadPdf
+    generateAndDownloadPdf,
+    generateAndDownloadPdfWithLayout
   } = usePdfGenerator();
 
   const theme = useMemo(
@@ -300,16 +303,26 @@ const App = () => {
     setInputText('');
     setRichText('');
     setPdfFileName('');
+    setEnhancedPdfData(null);
+    setIsLayoutPreserved(false);
     clearPdf();
   };
 
-  // PDF text extraction callback
-  const handlePdfTextExtracted = useCallback((text, fileName, pages) => {
+  // PDF text extraction callback - now supports layout preservation
+  const handlePdfTextExtracted = useCallback((text, fileName, pages, pdfData = null, layoutPreserved = false) => {
     setInputText(text);
     setPdfFileName(fileName);
+    setEnhancedPdfData(pdfData);
+    setIsLayoutPreserved(layoutPreserved);
+    
     if (text) {
-      setSnackbarMessage(`Extracted text from ${fileName} (${pages} page${pages !== 1 ? 's' : ''})`);
+      const layoutMessage = layoutPreserved ? ' with layout preservation' : '';
+      setSnackbarMessage(`Extracted text from ${fileName} (${pages} page${pages !== 1 ? 's' : ''})${layoutMessage}`);
       setSnackbarOpen(true);
+    } else {
+      // Clear enhanced data when text is cleared
+      setEnhancedPdfData(null);
+      setIsLayoutPreserved(false);
     }
   }, []);
 
@@ -319,7 +332,7 @@ const App = () => {
     setSnackbarOpen(true);
   }, []);
 
-  // PDF download handler
+  // PDF download handler - uses layout preservation when available
   const handleDownloadPdf = useCallback(async (unicodeCharacter, spaceName) => {
     const transformedText = replaceSpaces(inputText, unicodeCharacter);
     const baseName = pdfFileName
@@ -328,14 +341,26 @@ const App = () => {
     const outputFileName = `${baseName}_${spaceName.replace(/\s+/g, '_')}.pdf`;
     
     try {
-      await generateAndDownloadPdf(transformedText, outputFileName);
-      setSnackbarMessage(`Downloaded PDF with ${spaceName} spacing!`);
+      // Use layout-preserved generation when enhanced data is available
+      if (isLayoutPreserved && enhancedPdfData &&
+          enhancedPdfData.pageLayouts && enhancedPdfData.pageLayouts.length > 0 &&
+          enhancedPdfData.textItems && enhancedPdfData.textItems.length > 0) {
+        await generateAndDownloadPdfWithLayout(transformedText, enhancedPdfData, {
+          filename: outputFileName,
+          preserveLayout: true
+        });
+        setSnackbarMessage(`Downloaded PDF with ${spaceName} spacing (layout preserved)!`);
+      } else {
+        // Fall back to simple jsPDF generation
+        await generateAndDownloadPdf(transformedText, outputFileName);
+        setSnackbarMessage(`Downloaded PDF with ${spaceName} spacing!`);
+      }
       setSnackbarOpen(true);
     } catch (err) {
       setSnackbarMessage(`Error generating PDF: ${err.message}`);
       setSnackbarOpen(true);
     }
-  }, [inputText, pdfFileName, replaceSpaces, generateAndDownloadPdf]);
+  }, [inputText, pdfFileName, replaceSpaces, generateAndDownloadPdf, generateAndDownloadPdfWithLayout, enhancedPdfData, isLayoutPreserved]);
 
   const handleCopyText = useCallback((text, key, isHtml = false) => {
     if (isHtml && inputMode === 'rich') {

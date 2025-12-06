@@ -11,22 +11,26 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Typography
+  Typography,
+  Chip
 } from '@mui/material';
 import {
   Download as DownloadIcon,
   PictureAsPdf as PdfIcon,
   Edit as EditIcon,
-  Close as CloseIcon
+  Close as CloseIcon,
+  GridOn as LayoutIcon,
+  TextFields as SimpleIcon
 } from '@mui/icons-material';
 import { usePdfGenerator } from '../hooks/usePdfGenerator';
 
 /**
  * PdfDownloader Component
- * 
+ *
  * A Material UI styled component for generating and downloading PDFs from text.
  * Supports customizable filenames and displays loading/error states.
- * 
+ * Now supports layout-preserved PDF generation when enhancedPdfData is available.
+ *
  * @param {Object} props - Component props
  * @param {string} props.text - The text content to generate PDF from
  * @param {string} props.defaultFilename - Default filename for the PDF (optional)
@@ -38,6 +42,8 @@ import { usePdfGenerator } from '../hooks/usePdfGenerator';
  * @param {string} props.variant - Button variant: 'button', 'iconButton', or 'fullWidth' (optional)
  * @param {string} props.size - Button size: 'small', 'medium', or 'large' (optional)
  * @param {Object} props.pdfOptions - Custom PDF generation options (optional)
+ * @param {Object} props.enhancedPdfData - Enhanced PDF data with layout info for layout preservation (optional)
+ * @param {boolean} props.isLayoutPreserved - Whether layout data is available (optional)
  */
 const PdfDownloader = ({
   text,
@@ -49,7 +55,9 @@ const PdfDownloader = ({
   buttonText = 'Download PDF',
   variant = 'button',
   size = 'medium',
-  pdfOptions = {}
+  pdfOptions = {},
+  enhancedPdfData = null,
+  isLayoutPreserved = false
 }) => {
   const [filenameDialogOpen, setFilenameDialogOpen] = useState(false);
   const [customFilename, setCustomFilename] = useState(defaultFilename);
@@ -59,11 +67,24 @@ const PdfDownloader = ({
     isGenerating,
     generationError,
     generateAndDownloadPdf,
+    generateAndDownloadPdfWithLayout,
     clearError
   } = usePdfGenerator();
 
   /**
-   * Handles the download process
+   * Check if layout-preserved generation should be used
+   */
+  const shouldUseLayoutPreservation = useCallback(() => {
+    return isLayoutPreserved &&
+           enhancedPdfData &&
+           enhancedPdfData.pageLayouts &&
+           enhancedPdfData.pageLayouts.length > 0 &&
+           enhancedPdfData.textItems &&
+           enhancedPdfData.textItems.length > 0;
+  }, [isLayoutPreserved, enhancedPdfData]);
+
+  /**
+   * Handles the download process - uses layout-preserved generation when available
    */
   const handleDownload = useCallback(async (filename = customFilename) => {
     try {
@@ -76,10 +97,20 @@ const PdfDownloader = ({
         safeFilename += '.pdf';
       }
       
-      await generateAndDownloadPdf(text, safeFilename, pdfOptions);
+      // Use layout-preserved generation when enhanced data is available
+      if (shouldUseLayoutPreservation()) {
+        await generateAndDownloadPdfWithLayout(text, enhancedPdfData, {
+          filename: safeFilename,
+          preserveLayout: true,
+          ...pdfOptions
+        });
+      } else {
+        // Fall back to simple jsPDF generation
+        await generateAndDownloadPdf(text, safeFilename, pdfOptions);
+      }
       
       if (onDownloadComplete) {
-        onDownloadComplete(safeFilename);
+        onDownloadComplete(safeFilename, shouldUseLayoutPreservation());
       }
       
       setFilenameDialogOpen(false);
@@ -89,7 +120,7 @@ const PdfDownloader = ({
         onError(err);
       }
     }
-  }, [text, customFilename, pdfOptions, generateAndDownloadPdf, clearError, onDownloadComplete, onError]);
+  }, [text, customFilename, pdfOptions, enhancedPdfData, generateAndDownloadPdf, generateAndDownloadPdfWithLayout, clearError, onDownloadComplete, onError, shouldUseLayoutPreservation]);
 
   /**
    * Opens the filename customization dialog
@@ -129,16 +160,25 @@ const PdfDownloader = ({
   // Determine if download should be disabled
   const isDisabled = disabled || !text || text.trim().length === 0 || isGenerating;
 
+  // Get the appropriate tooltip text based on layout preservation status
+  const getTooltipText = useCallback(() => {
+    if (isDisabled) return 'No text available';
+    if (shouldUseLayoutPreservation()) {
+      return `${buttonText} (Layout Preserved)`;
+    }
+    return `${buttonText} (Simple Format)`;
+  }, [isDisabled, buttonText, shouldUseLayoutPreservation]);
+
   // Render icon button variant
   if (variant === 'iconButton') {
     return (
       <>
-        <Tooltip title={isDisabled ? 'No text available' : buttonText}>
+        <Tooltip title={getTooltipText()}>
           <span>
             <IconButton
               onClick={() => handleDownload(defaultFilename)}
               disabled={isDisabled}
-              color="primary"
+              color={shouldUseLayoutPreservation() ? 'success' : 'primary'}
               size={size}
               sx={{
                 transition: 'transform 0.2s ease',
@@ -152,6 +192,8 @@ const PdfDownloader = ({
             >
               {isGenerating ? (
                 <CircularProgress size={size === 'small' ? 16 : 24} />
+              ) : shouldUseLayoutPreservation() ? (
+                <LayoutIcon fontSize={size} />
               ) : (
                 <DownloadIcon fontSize={size} />
               )}
@@ -160,8 +202,8 @@ const PdfDownloader = ({
         </Tooltip>
         
         {showError && generationError && (
-          <Alert 
-            severity="error" 
+          <Alert
+            severity="error"
             sx={{ mt: 1 }}
             onClose={handleDismissError}
           >
@@ -177,8 +219,8 @@ const PdfDownloader = ({
     return (
       <Box sx={{ width: '100%' }}>
         {showError && generationError && (
-          <Alert 
-            severity="error" 
+          <Alert
+            severity="error"
             sx={{ mb: 2 }}
             onClose={handleDismissError}
           >
@@ -186,10 +228,24 @@ const PdfDownloader = ({
           </Alert>
         )}
         
+        {/* Layout preservation indicator */}
+        {shouldUseLayoutPreservation() && (
+          <Box sx={{ mb: 1, display: 'flex', justifyContent: 'center' }}>
+            <Chip
+              icon={<LayoutIcon />}
+              label="Layout Preserved Mode"
+              size="small"
+              color="success"
+              variant="outlined"
+            />
+          </Box>
+        )}
+        
         <Button
           variant="contained"
-          color="primary"
-          startIcon={isGenerating ? <CircularProgress size={20} color="inherit" /> : <PdfIcon />}
+          color={shouldUseLayoutPreservation() ? 'success' : 'primary'}
+          startIcon={isGenerating ? <CircularProgress size={20} color="inherit" /> :
+                     shouldUseLayoutPreservation() ? <LayoutIcon /> : <PdfIcon />}
           endIcon={<EditIcon fontSize="small" />}
           onClick={handleOpenFilenameDialog}
           disabled={isDisabled}
@@ -204,20 +260,33 @@ const PdfDownloader = ({
             }
           }}
         >
-          {isGenerating ? 'Generating...' : buttonText}
+          {isGenerating ? 'Generating...' :
+           shouldUseLayoutPreservation() ? `${buttonText} (Layout Preserved)` : buttonText}
         </Button>
 
         {/* Filename Customization Dialog */}
-        <Dialog 
-          open={filenameDialogOpen} 
+        <Dialog
+          open={filenameDialogOpen}
           onClose={handleCloseFilenameDialog}
           maxWidth="sm"
           fullWidth
         >
           <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <PdfIcon color="error" />
+              {shouldUseLayoutPreservation() ? (
+                <LayoutIcon color="success" />
+              ) : (
+                <PdfIcon color="error" />
+              )}
               <Typography variant="h6">Download PDF</Typography>
+              {shouldUseLayoutPreservation() && (
+                <Chip
+                  label="Layout Preserved"
+                  size="small"
+                  color="success"
+                  sx={{ ml: 1 }}
+                />
+              )}
             </Box>
             <IconButton onClick={handleCloseFilenameDialog} size="small">
               <CloseIcon />
@@ -226,7 +295,9 @@ const PdfDownloader = ({
           
           <DialogContent>
             <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-              Customize the filename for your PDF download.
+              {shouldUseLayoutPreservation()
+                ? 'Your PDF will preserve the original font positions and layout.'
+                : 'Customize the filename for your PDF download.'}
             </Typography>
             
             <TextField
@@ -261,8 +332,9 @@ const PdfDownloader = ({
             </Button>
             <Button
               variant="contained"
-              color="primary"
-              startIcon={isGenerating ? <CircularProgress size={20} color="inherit" /> : <DownloadIcon />}
+              color={shouldUseLayoutPreservation() ? 'success' : 'primary'}
+              startIcon={isGenerating ? <CircularProgress size={20} color="inherit" /> :
+                        shouldUseLayoutPreservation() ? <LayoutIcon /> : <DownloadIcon />}
               onClick={() => handleDownload(customFilename)}
               disabled={!customFilename.trim() || isGenerating}
             >
@@ -278,8 +350,8 @@ const PdfDownloader = ({
   return (
     <Box>
       {showError && generationError && (
-        <Alert 
-          severity="error" 
+        <Alert
+          severity="error"
           sx={{ mb: 2 }}
           onClose={handleDismissError}
         >
@@ -287,26 +359,30 @@ const PdfDownloader = ({
         </Alert>
       )}
       
-      <Button
-        variant="contained"
-        color="primary"
-        startIcon={isGenerating ? <CircularProgress size={20} color="inherit" /> : <DownloadIcon />}
-        onClick={() => handleDownload(defaultFilename)}
-        disabled={isDisabled}
-        size={size}
-        sx={{
-          transition: 'all 0.2s ease',
-          '&:hover': {
-            transform: 'translateY(-2px)',
-            boxShadow: 3
-          },
-          '&:active': {
-            transform: 'translateY(0)'
-          }
-        }}
-      >
-        {isGenerating ? 'Generating...' : buttonText}
-      </Button>
+      <Tooltip title={shouldUseLayoutPreservation() ? 'Layout will be preserved' : 'Simple text format'}>
+        <Button
+          variant="contained"
+          color={shouldUseLayoutPreservation() ? 'success' : 'primary'}
+          startIcon={isGenerating ? <CircularProgress size={20} color="inherit" /> :
+                    shouldUseLayoutPreservation() ? <LayoutIcon /> : <DownloadIcon />}
+          onClick={() => handleDownload(defaultFilename)}
+          disabled={isDisabled}
+          size={size}
+          sx={{
+            transition: 'all 0.2s ease',
+            '&:hover': {
+              transform: 'translateY(-2px)',
+              boxShadow: 3
+            },
+            '&:active': {
+              transform: 'translateY(0)'
+            }
+          }}
+        >
+          {isGenerating ? 'Generating...' :
+           shouldUseLayoutPreservation() ? `${buttonText} ✓` : buttonText}
+        </Button>
+      </Tooltip>
     </Box>
   );
 };

@@ -9,23 +9,27 @@ import {
   AlertTitle,
   IconButton,
   LinearProgress,
-  Tooltip
+  Tooltip,
+  Chip
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
   PictureAsPdf as PdfIcon,
-  Delete as DeleteIcon
+  Delete as DeleteIcon,
+  GridOn as LayoutIcon
 } from '@mui/icons-material';
 import { usePdfHandler } from '../hooks/usePdfHandler';
 
 /**
  * PdfUploader Component
- * 
+ *
  * A Material UI styled component for uploading and extracting text from PDF files.
  * Supports both drag-and-drop and click-to-upload functionality.
- * 
+ * Now supports layout-aware extraction for font and position preservation.
+ *
  * @param {Object} props - Component props
  * @param {Function} props.onTextExtracted - Callback when text is successfully extracted
+ *        Signature: (text, fileName, pageCount, enhancedPdfData, isLayoutPreserved) => void
  * @param {Function} props.onError - Callback when an error occurs
  * @param {Object} props.theme - MUI theme object for styling
  */
@@ -40,13 +44,15 @@ const PdfUploader = ({ onTextExtracted, onError, theme }) => {
     extractionError,
     pageCount,
     progress,
-    extractTextFromPdf,
+    enhancedPdfData,
+    isLayoutPreserved,
+    extractPdfWithLayout,
     clearPdf,
     getTextPreview
   } = usePdfHandler();
 
   /**
-   * Handles file drop event
+   * Handles file drop event - uses layout-aware extraction
    */
   const handleDrop = useCallback(async (e) => {
     e.preventDefault();
@@ -59,16 +65,32 @@ const PdfUploader = ({ onTextExtracted, onError, theme }) => {
     const file = files[0];
     
     try {
-      const text = await extractTextFromPdf(file);
+      // Use layout-aware extraction for font and position preservation
+      const extractedData = await extractPdfWithLayout(file);
+      
+      // Build plain text from the extraction for display/transformation
+      // IMPORTANT: Use direct concatenation (no spaces) to match character offsets
+      // The text items already contain any necessary spacing from the PDF
+      const plainText = extractedData.textItems
+        .map(item => item.text)
+        .join('');
+      
       if (onTextExtracted) {
-        onTextExtracted(text, file.name, pageCount);
+        // Pass both plain text and enhanced data with layout info
+        onTextExtracted(
+          plainText,
+          file.name,
+          extractedData.pageCount,
+          extractedData,  // Full enhanced PDF data
+          true            // Layout preserved flag
+        );
       }
     } catch (err) {
       if (onError) {
         onError(err);
       }
     }
-  }, [extractTextFromPdf, onTextExtracted, onError, pageCount]);
+  }, [extractPdfWithLayout, onTextExtracted, onError]);
 
   /**
    * Handles drag over event
@@ -89,7 +111,7 @@ const PdfUploader = ({ onTextExtracted, onError, theme }) => {
   }, []);
 
   /**
-   * Handles file input change
+   * Handles file input change - uses layout-aware extraction
    */
   const handleFileSelect = useCallback(async (e) => {
     const files = e.target.files;
@@ -98,9 +120,25 @@ const PdfUploader = ({ onTextExtracted, onError, theme }) => {
     const file = files[0];
     
     try {
-      const text = await extractTextFromPdf(file);
+      // Use layout-aware extraction for font and position preservation
+      const extractedData = await extractPdfWithLayout(file);
+      
+      // Build plain text from the extraction for display/transformation
+      // IMPORTANT: Use direct concatenation (no spaces) to match character offsets
+      // The text items already contain any necessary spacing from the PDF
+      const plainText = extractedData.textItems
+        .map(item => item.text)
+        .join('');
+      
       if (onTextExtracted) {
-        onTextExtracted(text, file.name, pageCount);
+        // Pass both plain text and enhanced data with layout info
+        onTextExtracted(
+          plainText,
+          file.name,
+          extractedData.pageCount,
+          extractedData,  // Full enhanced PDF data
+          true            // Layout preserved flag
+        );
       }
     } catch (err) {
       if (onError) {
@@ -112,7 +150,7 @@ const PdfUploader = ({ onTextExtracted, onError, theme }) => {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  }, [extractTextFromPdf, onTextExtracted, onError, pageCount]);
+  }, [extractPdfWithLayout, onTextExtracted, onError]);
 
   /**
    * Handles click on upload zone
@@ -129,7 +167,8 @@ const PdfUploader = ({ onTextExtracted, onError, theme }) => {
   const handleClear = useCallback(() => {
     clearPdf();
     if (onTextExtracted) {
-      onTextExtracted('', '', 0);
+      // Clear all data including enhanced PDF data
+      onTextExtracted('', '', 0, null, false);
     }
   }, [clearPdf, onTextExtracted]);
 
@@ -288,19 +327,36 @@ const PdfUploader = ({ onTextExtracted, onError, theme }) => {
               p: 2,
               borderBottom: '1px solid',
               borderColor: borderColor,
-              backgroundColor: isDarkMode 
-                ? 'rgba(255, 255, 255, 0.05)' 
+              backgroundColor: isDarkMode
+                ? 'rgba(255, 255, 255, 0.05)'
                 : 'rgba(0, 0, 0, 0.02)'
             }}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <PdfIcon sx={{ fontSize: 40, color: errorColor }} />
               <Box>
-                <Typography variant="subtitle1" fontWeight="bold">
-                  {pdfFile.name}
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                  <Typography variant="subtitle1" fontWeight="bold">
+                    {pdfFile.name}
+                  </Typography>
+                  {isLayoutPreserved && (
+                    <Tooltip title="Layout and font positions preserved for output">
+                      <Chip
+                        icon={<LayoutIcon />}
+                        label="Layout Preserved"
+                        size="small"
+                        color="success"
+                        variant="outlined"
+                        sx={{ height: 22, fontSize: '0.7rem' }}
+                      />
+                    </Tooltip>
+                  )}
+                </Box>
                 <Typography variant="body2" color="textSecondary">
                   {formatFileSize(pdfFile.size)} • {pageCount} page{pageCount !== 1 ? 's' : ''} • {pdfText.length.toLocaleString()} characters
+                  {enhancedPdfData && enhancedPdfData.fonts && enhancedPdfData.fonts.size > 0 && (
+                    <> • {enhancedPdfData.fonts.size} font{enhancedPdfData.fonts.size !== 1 ? 's' : ''}</>
+                  )}
                 </Typography>
               </Box>
             </Box>
