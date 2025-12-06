@@ -1002,6 +1002,38 @@ For a detailed deep-dive into the technical implementation of this feature, refe
 **New Utilities:**
 - **`src/utils/pdfTypes.js`**: Defines comprehensive data structures for `EnhancedPdfData`, `TextItem`, `PageLayout`, and `FontInfo`.
 - **`src/utils/fontManager.js`**: Handles font detection, style mapping, and fallback resolution strategies.
+- **`src/utils/colorExtractor.js`**: Extracts text colors using PDF.js `getOperatorList()` for accurate color reproduction.
+- **`src/utils/columnDetector.js`**: Analyzes text positions to detect multi-column layouts (2-4 columns) and ensures correct reading order.
+- **`src/utils/fontLoader.js`**: Manages lazy loading and caching of custom fonts (specifically Noto Sans) from Google Fonts CDN.
+
+**Architecture Diagram (Enhanced):**
+
+```mermaid
+flowchart TB
+    subgraph Input
+        A[PDF File] --> B[usePdfHandler]
+    end
+    
+    subgraph Extraction Pipeline
+        B --> C[PDF.js getDocument]
+        C --> D[Extract Text & Layout]
+        D --> E[Color Extraction (getOperatorList)]
+        D --> F[Column Detection]
+        E --> G[EnhancedPdfData]
+        F --> G
+    end
+    
+    subgraph Transformation
+        G --> H[Space Transformation]
+    end
+    
+    subgraph Generation Pipeline
+        H --> I[usePdfGenerator]
+        I --> J[Font Loading (fontLoader)]
+        J --> K[pdf-lib Generation]
+        K --> L[Output PDF]
+    end
+```
 
 **Bundle Size Impact:**
 The addition of `pdf-lib` and `@pdf-lib/fontkit` adds approximately **~250KB** to the bundle size. This is a calculated trade-off for the significant improvement in output quality and feature capability.

@@ -8,6 +8,7 @@ import {
   parseTransform
 } from '../utils/pdfTypes';
 import fontManager, { mapFontStyle } from '../utils/fontManager';
+import { extractAndMergeColors } from '../utils/colorExtractor';
 
 // Configure PDF.js worker using unpkg CDN with proper HTTPS
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
@@ -285,21 +286,9 @@ export const usePdfHandler = () => {
           textItem.pageIndex = i - 1;
           textItem.transform = transform;
           
-          // Default color (black) - PDF.js doesn't always provide color info
+          // Default color (black) - will be updated by color extraction
           textItem.color = { r: 0, g: 0, b: 0 };
-          
-          // Try to extract color if available from styles
-          if (textContent.styles && item.fontName && textContent.styles[item.fontName]) {
-            const style = textContent.styles[item.fontName];
-            // Some PDF.js versions provide color info
-            if (style.fillColor) {
-              textItem.color = {
-                r: style.fillColor[0] || 0,
-                g: style.fillColor[1] || 0,
-                b: style.fillColor[2] || 0
-              };
-            }
-          }
+          textItem.colorFromOperatorList = false;
           
           // Track character offset for this text item
           // This allows mapping transformed text back to original positions
@@ -308,7 +297,6 @@ export const usePdfHandler = () => {
           globalCharOffset += item.str.length;
           
           pageTextItems.push(textItem);
-          extractedData.textItems.push(textItem);
           
           // Update bounds for margin calculation
           if (parsed.x < minX) minX = parsed.x;
@@ -333,8 +321,24 @@ export const usePdfHandler = () => {
           pageText += item.str + ' ';
         }
         
+        // Extract colors using operator list for accurate color data
+        // This replaces the unreliable styles.fillColor approach
+        let colorEnhancedItems = pageTextItems;
+        try {
+          colorEnhancedItems = await extractAndMergeColors(page, pageTextItems);
+          console.log(`Page ${i}: Enhanced ${colorEnhancedItems.length} text items with color data`);
+        } catch (colorErr) {
+          console.warn(`Page ${i}: Color extraction failed, using default colors:`, colorErr.message);
+          // Keep pageTextItems with default black colors
+        }
+        
+        // Add color-enhanced items to extracted data
+        for (const item of colorEnhancedItems) {
+          extractedData.textItems.push(item);
+        }
+        
         // Calculate margins from content bounds (with fallbacks)
-        if (pageTextItems.length > 0) {
+        if (colorEnhancedItems.length > 0) {
           pageLayout.margins = {
             left: Math.max(0, minX),
             right: Math.max(0, viewport.width - maxX),

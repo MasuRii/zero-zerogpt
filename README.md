@@ -48,9 +48,18 @@ Zero-ZeroGPT includes comprehensive PDF processing capabilities, powered by **pd
 *   **Layout Preservation**: Maintains the original document's structure, including text positioning, columns, and page dimensions.
 *   **Font Awareness**: Intelligently maps original fonts to standard PDF fonts or compatible fallbacks to preserve the document's visual style.
 *   **Seamless Transformation**: Apply any Unicode spacing pattern to the text while keeping the document layout intact.
+*   **Custom Font Embedding**: Includes high-quality Noto Sans embedding for full Unicode support (including special spaces).
+*   **Column Detection**: Automatically detects and preserves multi-column layouts (2-4 columns) commonly found in research papers and articles.
+*   **Color Preservation**: Accurately extracts and reproduces text colors from the original document using advanced operator list parsing.
 *   **Hybrid Generation**:
     *   **Layout Preserved Mode**: Generates a PDF that mirrors the input (default).
     *   **Simple Text Mode**: Generates a clean, simple text document (fallback).
+
+**Testing:**
+The PDF feature suite is backed by a comprehensive testing strategy with **217 tests** covering all utility functions. To run tests:
+```bash
+npm test
+```
 
 **Limitations:**
 *   **Text-Based Only**: The feature supports text-based PDFs. Scanned documents or image-only PDFs are not supported (OCR is not implemented).

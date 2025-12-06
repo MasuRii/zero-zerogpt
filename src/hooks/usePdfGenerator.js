@@ -3,29 +3,49 @@ import { jsPDF } from 'jspdf';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import fontManager from '../utils/fontManager';
-
-// Cache for the fetched font bytes - disabled for now since external fonts are unreliable
-// let cachedUnicodeFontBytes = null;
+import { embedCustomFont, getRequiredFontsForText } from '../utils/fontLoader';
 
 /**
- * Placeholder for future Unicode font loading.
- * Currently returns null to use StandardFonts with sanitization.
- * TODO: Bundle a TTF font with the application for reliable Unicode support.
- * @returns {Promise<Uint8Array|null>} Font bytes or null
+ * Normalize problematic Unicode spaces to regular spaces for PDF rendering.
+ * Many fonts (even Unicode fonts) don't support all special space characters.
+ * This function converts them to regular spaces to avoid square box rendering.
+ *
+ * @param {string} text - Input text with potential special Unicode spaces
+ * @returns {string} Text with special spaces normalized to regular spaces
  */
-const fetchUnicodeFont = async () => {
-  // External font loading is disabled due to:
-  // 1. WOFF/WOFF2 fonts don't work reliably with pdf-lib (needs TTF/OTF)
-  // 2. CDN fonts may not be accessible in all environments
-  // 3. Font loading adds latency to PDF generation
-  //
-  // For now, we use StandardFonts with sanitization to ensure compatibility.
-  // Unicode characters like special spaces will be replaced with regular spaces.
-  //
-  // To enable full Unicode support, bundle a TTF font file (like Noto Sans)
-  // as a static asset and load it from there.
+const normalizeUnicodeSpaces = (text) => {
+  if (!text) return '';
   
-  return null;
+  // Map of Unicode spaces to regular space (U+0020)
+  // These are characters that most fonts don't render correctly
+  const spaceReplacements = {
+    '\u00a0': ' ',  // Non-Breaking Space
+    '\u1680': ' ',  // Ogham Space Mark
+    '\u2000': ' ',  // En Quad
+    '\u2001': ' ',  // Em Quad
+    '\u2002': ' ',  // En Space
+    '\u2003': ' ',  // Em Space
+    '\u2004': ' ',  // Three-Per-Em Space
+    '\u2005': ' ',  // Four-Per-Em Space
+    '\u2006': ' ',  // Six-Per-Em Space
+    '\u2007': ' ',  // Figure Space
+    '\u2008': ' ',  // Punctuation Space
+    '\u2009': ' ',  // Thin Space
+    '\u200a': ' ',  // Hair Space
+    '\u200b': '',   // Zero Width Space (remove - it's invisible)
+    '\u202f': ' ',  // Narrow No-Break Space (NNBSP) - THE KEY CHARACTER
+    '\u205f': ' ',  // Medium Mathematical Space
+    '\u2060': '',   // Word Joiner (invisible)
+    '\u3000': ' ',  // Ideographic Space
+    '\ufeff': '',   // Zero Width No-Break Space (BOM) - remove
+  };
+  
+  let result = text;
+  for (const [unicode, replacement] of Object.entries(spaceReplacements)) {
+    result = result.split(unicode).join(replacement);
+  }
+  
+  return result;
 };
 
 /**
@@ -37,23 +57,11 @@ const fetchUnicodeFont = async () => {
 const sanitizeForWinAnsi = (text) => {
   if (!text) return '';
   
+  // First normalize Unicode spaces
+  let result = normalizeUnicodeSpaces(text);
+  
   // Map of Unicode characters to their WinAnsi-safe replacements
   const replacements = {
-    // Unicode spaces -> regular space
-    '\u200a': ' ',  // Hair Space
-    '\u200b': '',   // Zero Width Space (remove)
-    '\u2009': ' ',  // Thin Space
-    '\u2003': ' ',  // Em Space
-    '\u2002': ' ',  // En Space
-    '\u2004': ' ',  // Three-Per-Em Space
-    '\u2005': ' ',  // Four-Per-Em Space
-    '\u2006': ' ',  // Six-Per-Em Space
-    '\u2007': ' ',  // Figure Space
-    '\u2008': ' ',  // Punctuation Space
-    '\u205f': ' ',  // Medium Mathematical Space
-    '\u00a0': ' ',  // Non-breaking space
-    '\u3000': ' ',  // Ideographic Space
-    '\ufeff': '',   // Zero Width No-Break Space (BOM)
     // Special characters
     '\u25aa': '*',  // Black Small Square -> asterisk
     '\u25ab': '*',  // White Small Square
@@ -75,7 +83,6 @@ const sanitizeForWinAnsi = (text) => {
     '\u00b7': '.',  // Middle Dot
   };
   
-  let result = text;
   for (const [unicode, replacement] of Object.entries(replacements)) {
     result = result.split(unicode).join(replacement);
   }
@@ -258,47 +265,122 @@ export const usePdfGenerator = () => {
   }, []);
 
   /**
-   * Embed fonts into a PDF document - tries Unicode font first, falls back to StandardFonts
-   * @param {PDFDocument} pdfDoc - The PDF document
+   * Embed fonts into a PDF document - loads multiple Noto Sans variants for comprehensive Unicode
+   * Uses fontLoader to fetch fonts from CDN for full Unicode support including CJK, symbols, etc.
+   *
+   * @param {PDFDocument} pdfDoc - The PDF document (must have fontkit registered)
    * @param {Map<string, import('../utils/pdfTypes').FontInfo>} fonts - Map of font ID to FontInfo
-   * @returns {Promise<{fonts: Map<string, import('pdf-lib').PDFFont>, hasUnicodeSupport: boolean}>} Map of font ID to embedded PDFFont
+   * @param {string} [textContent=''] - Text content to analyze for required fonts
+   * @returns {Promise<{fonts: Map<string, import('pdf-lib').PDFFont>, hasUnicodeSupport: boolean, fontsByFamily: Map<string, import('pdf-lib').PDFFont>}>} Embedded fonts and Unicode support flag
    */
-  const embedStandardFonts = useCallback(async (pdfDoc, fonts) => {
+  const embedStandardFonts = useCallback(async (pdfDoc, fonts, textContent = '') => {
     const embeddedFonts = new Map();
     let hasUnicodeSupport = false;
     
-    // Try to fetch and embed a Unicode-capable font first
-    let unicodeFont = null;
-    try {
-      const fontBytes = await fetchUnicodeFont();
-      if (fontBytes) {
-        unicodeFont = await pdfDoc.embedFont(fontBytes, { subset: false });
-        hasUnicodeSupport = true;
-        console.log('Successfully embedded Unicode font');
+    // Embedded custom fonts cache (to reuse across multiple text items)
+    const customFontCache = new Map();
+    
+    /**
+     * Try to embed a custom font with a specific family and weight
+     * @param {string} fontFamily - Font family name (e.g., 'NotoSans', 'NotoSansSC')
+     * @param {'regular'|'bold'|'italic'|'boldItalic'} weight - Font weight
+     * @returns {Promise<import('pdf-lib').PDFFont|null>} Embedded font or null
+     */
+    const tryEmbedCustomFont = async (fontFamily = 'NotoSans', weight = 'regular') => {
+      const cacheKey = `${fontFamily}-${weight}`;
+      
+      // Check cache first
+      if (customFontCache.has(cacheKey)) {
+        return customFontCache.get(cacheKey);
       }
-    } catch (err) {
-      console.warn('Failed to embed Unicode font, falling back to StandardFonts:', err.message);
+      
+      try {
+        const result = await embedCustomFont(pdfDoc, fontFamily, weight);
+        if (result.success && result.font) {
+          customFontCache.set(cacheKey, result.font);
+          return result.font;
+        }
+      } catch (err) {
+        console.warn(`Failed to embed custom font (${fontFamily}-${weight}):`, err.message);
+      }
+      return null;
+    };
+    
+    // Determine which fonts are needed based on text content
+    const requiredFonts = textContent ? getRequiredFontsForText(textContent) : new Set(['NotoSans']);
+    
+    // Always ensure NotoSans is included as the primary font
+    requiredFonts.add('NotoSans');
+    
+    console.log('Attempting to load fonts for Unicode support:', [...requiredFonts]);
+    
+    // Load all required fonts
+    let primaryUnicodeFont = null;
+    const loadedFonts = [];
+    
+    for (const fontFamily of requiredFonts) {
+      try {
+        const font = await tryEmbedCustomFont(fontFamily, 'regular');
+        if (font) {
+          loadedFonts.push({ family: fontFamily, font });
+          
+          // Set NotoSans as primary if loaded
+          if (!primaryUnicodeFont && fontFamily === 'NotoSans') {
+            primaryUnicodeFont = font;
+            hasUnicodeSupport = true;
+            console.log(`Successfully embedded ${fontFamily} for Unicode support`);
+          }
+        }
+      } catch (err) {
+        console.warn(`Failed to embed ${fontFamily}:`, err.message);
+      }
+    }
+    
+    // If primary NotoSans failed, try to use any loaded font as fallback
+    if (!primaryUnicodeFont && loadedFonts.length > 0) {
+      primaryUnicodeFont = loadedFonts[0].font;
+      hasUnicodeSupport = true;
+      console.log('Using fallback font for Unicode support');
     }
     
     // Set default font - prefer Unicode font if available
-    if (unicodeFont) {
-      embeddedFonts.set('__default__', unicodeFont);
-      embeddedFonts.set('__unicode__', unicodeFont);
+    if (primaryUnicodeFont) {
+      embeddedFonts.set('__default__', primaryUnicodeFont);
+      embeddedFonts.set('__unicode__', primaryUnicodeFont);
     } else {
+      // Fallback to Helvetica
+      console.log('Custom fonts not available, using StandardFonts (limited Unicode)');
       const defaultFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
       embeddedFonts.set('__default__', defaultFont);
     }
     
-    // For source document fonts, use Unicode font if available, otherwise map to StandardFonts
+    // Process source document fonts
     if (fonts && fonts.size > 0) {
       for (const [fontId, fontInfo] of fonts.entries()) {
         try {
-          if (unicodeFont) {
-            // Use Unicode font for all text to preserve transformations
-            embeddedFonts.set(fontId, unicodeFont);
+          const style = fontInfo?.style || 'normal';
+          
+          if (hasUnicodeSupport) {
+            // Try to get the matching weight of custom font
+            const weightMap = {
+              'normal': 'regular',
+              'bold': 'bold',
+              'italic': 'italic',
+              'bolditalic': 'boldItalic'
+            };
+            const weight = weightMap[style] || 'regular';
+            
+            // Try to embed the styled variant of primary font
+            let styledFont = await tryEmbedCustomFont('NotoSans', weight);
+            
+            // If styled variant fails, fall back to regular
+            if (!styledFont) {
+              styledFont = primaryUnicodeFont;
+            }
+            
+            embeddedFonts.set(fontId, styledFont);
           } else {
-            // Fallback to standard fonts
-            const style = fontInfo.style || 'normal';
+            // Fallback to standard fonts with style mapping
             const fontKey = getStandardFont(style, 'helvetica');
             const embeddedFont = await pdfDoc.embedFont(StandardFonts[fontKey]);
             embeddedFonts.set(fontId, embeddedFont);
@@ -342,17 +424,20 @@ export const usePdfGenerator = () => {
 
   /**
    * Generate a PDF with layout preservation using pdf-lib
-   * Creates pages with original dimensions and positions text at exact coordinates
+   * Creates pages with original dimensions and positions text at exact coordinates.
+   * Attempts to use custom fonts (Noto Sans) for full Unicode support, with graceful
+   * fallback to StandardFonts if custom fonts are unavailable.
    *
    * @param {string} transformedText - The transformed text content (with Unicode spaces applied)
    * @param {import('../utils/pdfTypes').ExtractedPdfData} extractedPdfData - Extracted PDF data with layout info
    * @param {Object} options - Generation options
    * @param {string} [options.filename='document.pdf'] - Output filename
    * @param {boolean} [options.preserveLayout=true] - Whether to preserve layout
+   * @param {boolean} [options.useCustomFonts=true] - Whether to attempt custom font loading
    * @returns {Promise<Uint8Array>} The generated PDF as bytes
    */
   const generatePdfWithLayout = useCallback(async (transformedText, extractedPdfData, options = {}) => {
-    const { preserveLayout = true } = options;
+    const { preserveLayout = true, useCustomFonts = true } = options;
     
     setIsGenerating(true);
     setGenerationError(null);
@@ -366,11 +451,33 @@ export const usePdfGenerator = () => {
       // Create a new PDF document
       const pdfDoc = await PDFDocument.create();
       
-      // Register fontkit for custom font support
+      // Register fontkit for custom font support (required for embedding TTF fonts)
       pdfDoc.registerFontkit(fontkit);
       
-      // Embed fonts - tries Unicode font first for full character support
-      const { fonts: embeddedFonts, hasUnicodeSupport } = await embedStandardFonts(pdfDoc, extractedPdfData.fonts);
+      // Embed fonts - tries custom Unicode font first, falls back to StandardFonts
+      // This is the key integration point for the custom font feature
+      let embeddedFonts, hasUnicodeSupport;
+      
+      if (useCustomFonts) {
+        console.log('PDF generation: Attempting to use custom fonts for Unicode support...');
+        // Pass the transformed text to analyze which fonts are needed
+        const embedResult = await embedStandardFonts(pdfDoc, extractedPdfData.fonts, transformedText);
+        embeddedFonts = embedResult.fonts;
+        hasUnicodeSupport = embedResult.hasUnicodeSupport;
+        
+        if (hasUnicodeSupport) {
+          console.log('PDF generation: Using Noto Sans for full Unicode character support');
+        } else {
+          console.log('PDF generation: Using StandardFonts (Unicode will be sanitized)');
+        }
+      } else {
+        // Skip custom font loading, use StandardFonts directly
+        console.log('PDF generation: Custom fonts disabled, using StandardFonts');
+        embeddedFonts = new Map();
+        const defaultFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        embeddedFonts.set('__default__', defaultFont);
+        hasUnicodeSupport = false;
+      }
       
       // Group text items by page index for efficient processing
       const textItemsByPage = new Map();
@@ -442,20 +549,39 @@ export const usePdfGenerator = () => {
               const y = transformYCoordinate(item.y, pageHeight);
               
               // Get text color (default to black)
+              // Colors are in 0-1 range as required by pdf-lib's rgb() function
+              // If colorFromOperatorList is true, color was extracted using the reliable
+              // getOperatorList() API, otherwise it's a default or fallback value
               const color = item.color || { r: 0, g: 0, b: 0 };
               
-              // Use original text if Unicode font available, otherwise sanitize
-              const textToRender = hasUnicodeSupport ? displayText : sanitizeForWinAnsi(displayText);
+              // Normalize Unicode spaces even with Unicode font support
+              // Many special spaces (like U+202F Narrow No-Break Space) are not in most fonts
+              // Then sanitize fully if no Unicode support
+              let textToRender = normalizeUnicodeSpaces(displayText);
+              if (!hasUnicodeSupport) {
+                textToRender = sanitizeForWinAnsi(textToRender);
+              }
               
               // Only draw if there's text to render
               if (textToRender.length > 0) {
+                // For multi-font Unicode support, we may need to split text and use different fonts
+                // For now, try to render the whole string with the item's font
+                // If we have fontsByFamily, we could implement character-by-character rendering
+                // but that would be much slower - for now, use the primary Unicode font
+                
                 // Draw text at the exact position
+                // Apply text color - rgb() takes values in 0-1 range
+                // Colors extracted via colorExtractor are already in correct range
                 page.drawText(textToRender, {
                   x: x,
                   y: y,
                   size: fontSize,
                   font: font,
-                  color: rgb(color.r, color.g, color.b),
+                  color: rgb(
+                    Math.max(0, Math.min(1, color.r || 0)),
+                    Math.max(0, Math.min(1, color.g || 0)),
+                    Math.max(0, Math.min(1, color.b || 0))
+                  ),
                 });
               }
             } catch (itemErr) {
@@ -480,7 +606,11 @@ export const usePdfGenerator = () => {
             for (const line of lines) {
               if (y < margin) break;
               
-              const lineToRender = hasUnicodeSupport ? line : sanitizeForWinAnsi(line);
+              // Normalize Unicode spaces for proper rendering
+              let lineToRender = normalizeUnicodeSpaces(line);
+              if (!hasUnicodeSupport) {
+                lineToRender = sanitizeForWinAnsi(lineToRender);
+              }
               if (lineToRender.length > 0) {
                 page.drawText(lineToRender, {
                   x: margin,

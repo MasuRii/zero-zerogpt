@@ -1,13 +1,20 @@
 /**
  * Font Manager Utility
- * 
+ *
  * This module provides font management utilities for PDF font preservation,
- * including standard font detection, fallback mapping, and font style detection.
- * 
+ * including standard font detection, fallback mapping, font style detection,
+ * and custom font integration for wider Unicode support.
+ *
  * @module fontManager
  */
 
 import { createFontInfo } from './pdfTypes';
+import {
+  loadCustomFont,
+  supportsUnicode as fontLoaderSupportsUnicode,
+  areFontsLoaded,
+  preloadFonts as preloadCustomFonts
+} from './fontLoader';
 
 // ============================================================================
 // Standard PDF Fonts
@@ -134,6 +141,26 @@ const FONT_FALLBACK_MAP = Object.freeze({
  * @type {string}
  */
 export const DEFAULT_FALLBACK_FONT = 'Helvetica';
+
+/**
+ * Custom fonts that support wider Unicode character sets
+ * These fonts can be loaded from CDN and embedded in PDFs
+ * @readonly
+ */
+export const CUSTOM_FONTS = Object.freeze({
+  'NotoSans': {
+    regular: 'NotoSans-Regular.ttf',
+    bold: 'NotoSans-Bold.ttf',
+    italic: 'NotoSans-Italic.ttf',
+    boldItalic: 'NotoSans-BoldItalic.ttf'
+  }
+});
+
+/**
+ * Preferred custom font for Unicode support
+ * @type {string}
+ */
+export const PREFERRED_UNICODE_FONT = 'NotoSans';
 
 // ============================================================================
 // Font Manager Class
@@ -384,6 +411,156 @@ class FontManager {
   clearCache() {
     this.fontInfoCache.clear();
   }
+
+  // ==========================================================================
+  // Custom Font Integration Methods
+  // ==========================================================================
+
+  /**
+   * Get embeddable font bytes for a custom font
+   * Uses fontLoader to fetch font from CDN or local cache.
+   * Prefer this for Unicode-capable fonts like Noto Sans.
+   *
+   * @param {string} [fontFamily='NotoSans'] - Font family name
+   * @param {'normal'|'bold'|'italic'|'bolditalic'} [style='normal'] - Font style
+   * @returns {Promise<Uint8Array|null>} Font bytes or null if unavailable
+   *
+   * @example
+   * const bytes = await fontManager.getEmbeddableFont('NotoSans', 'bold');
+   * if (bytes) {
+   *   const font = await pdfDoc.embedFont(bytes, { subset: true });
+   * }
+   */
+  async getEmbeddableFont(fontFamily = 'NotoSans', style = 'normal') {
+    // Map style to fontLoader weight format
+    const weightMap = {
+      'normal': 'regular',
+      'bold': 'bold',
+      'italic': 'italic',
+      'bolditalic': 'boldItalic'
+    };
+    
+    const weight = weightMap[style] || 'regular';
+    
+    try {
+      const fontBytes = await loadCustomFont(fontFamily, weight);
+      return fontBytes;
+    } catch (err) {
+      console.warn(`Failed to get embeddable font ${fontFamily}-${style}:`, err.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get custom font bytes for embedding using a FontInfo object
+   * Automatically maps FontInfo style to the correct font weight.
+   *
+   * @param {import('./pdfTypes').FontInfo} fontInfo - FontInfo object with style info
+   * @returns {Promise<Uint8Array|null>} Font bytes or null if unavailable
+   */
+  async getEmbeddableFontFromInfo(fontInfo) {
+    const style = fontInfo?.style || 'normal';
+    return this.getEmbeddableFont(PREFERRED_UNICODE_FONT, style);
+  }
+
+  /**
+   * Check if a font family supports wider Unicode characters
+   * Standard PDF fonts (Helvetica, Times, Courier) only support WinAnsi.
+   * Custom fonts like Noto Sans support full Unicode including special spaces.
+   *
+   * @param {string} fontName - Font family name
+   * @returns {boolean} True if the font supports wider Unicode
+   */
+  supportsUnicode(fontName) {
+    // Check custom fonts first
+    if (CUSTOM_FONTS[fontName]) {
+      return fontLoaderSupportsUnicode(fontName);
+    }
+    
+    // Standard PDF fonts don't support full Unicode
+    if (this.isStandardFont(fontName)) {
+      return false;
+    }
+    
+    // Unknown fonts - assume limited Unicode support
+    return false;
+  }
+
+  /**
+   * Check if custom fonts are available (loaded in cache)
+   * @returns {boolean} True if custom fonts are ready
+   */
+  hasCustomFontsAvailable() {
+    return areFontsLoaded();
+  }
+
+  /**
+   * Check if a specific custom font is available
+   * @param {string} fontFamily - Font family name
+   * @returns {boolean} True if the font family is registered
+   */
+  hasCustomFont(fontFamily) {
+    return CUSTOM_FONTS.hasOwnProperty(fontFamily);
+  }
+
+  /**
+   * Preload custom fonts for faster PDF generation
+   * Call this during app initialization for better UX.
+   * @returns {Promise<void>}
+   */
+  async preloadCustomFonts() {
+    return preloadCustomFonts();
+  }
+
+  /**
+   * Get the preferred font for Unicode text
+   * Returns custom font name if available, otherwise fallback to standard.
+   *
+   * @param {string} [desiredFamily] - Desired font family
+   * @returns {string} Font name to use for Unicode text
+   */
+  getPreferredUnicodeFont(desiredFamily) {
+    // If a specific family is requested and it supports Unicode, use it
+    if (desiredFamily && this.supportsUnicode(desiredFamily)) {
+      return desiredFamily;
+    }
+    
+    // Default to Noto Sans for Unicode support
+    return PREFERRED_UNICODE_FONT;
+  }
+
+  /**
+   * Determine the best font to use for a text item
+   * Prefers custom Unicode fonts when available, falls back to standard fonts.
+   *
+   * @param {import('./pdfTypes').FontInfo} fontInfo - Font info from extracted PDF
+   * @param {boolean} hasCustomFontsLoaded - Whether custom fonts are available
+   * @returns {Object} Font selection result
+   * @returns {string} result.fontFamily - Selected font family name
+   * @returns {boolean} result.useCustomFont - Whether to use custom font embedding
+   * @returns {string} result.fallbackStandardFont - Standard font for fallback
+   */
+  selectBestFont(fontInfo, hasCustomFontsLoaded = false) {
+    const style = fontInfo?.style || 'normal';
+    const fallbackStandardFont = this.getStyledFontName(
+      fontInfo?.fallbackFont || DEFAULT_FALLBACK_FONT,
+      style
+    );
+    
+    if (hasCustomFontsLoaded) {
+      return {
+        fontFamily: PREFERRED_UNICODE_FONT,
+        useCustomFont: true,
+        fallbackStandardFont
+      };
+    }
+    
+    return {
+      fontFamily: fallbackStandardFont,
+      useCustomFont: false,
+      fallbackStandardFont
+    };
+  }
 }
 
 // ============================================================================
@@ -406,6 +583,15 @@ export const createFontInfoFromName = (fontName, fontId) => fontManager.createFo
 export const parsePdfFontReference = (internalFontName, displayName) => fontManager.parsePdfFontReference(internalFontName, displayName);
 export const getStandardFontKey = (style, family) => fontManager.getStandardFontKey(style, family);
 export const clearFontCache = () => fontManager.clearCache();
+
+// New exports for custom font support
+export const getEmbeddableFont = (fontFamily, style) => fontManager.getEmbeddableFont(fontFamily, style);
+export const supportsUnicode = (fontName) => fontManager.supportsUnicode(fontName);
+export const hasCustomFont = (fontFamily) => fontManager.hasCustomFont(fontFamily);
+export const hasCustomFontsAvailable = () => fontManager.hasCustomFontsAvailable();
+export const preloadFonts = () => fontManager.preloadCustomFonts();
+export const getPreferredUnicodeFont = (desiredFamily) => fontManager.getPreferredUnicodeFont(desiredFamily);
+export const selectBestFont = (fontInfo, hasCustomFontsLoaded) => fontManager.selectBestFont(fontInfo, hasCustomFontsLoaded);
 
 // Export the class for advanced use cases
 export { FontManager };

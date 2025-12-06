@@ -372,3 +372,173 @@ export function pointsToInches(points) {
 export function inchesToPoints(inches) {
   return inches * 72;
 }
+
+// ============================================================================
+// Color Types (for Color Preservation feature)
+// ============================================================================
+
+/**
+ * @typedef {Object} ColorInfo
+ * @description RGB color information with optional alpha channel
+ * @property {number} r - Red component (0-1 range)
+ * @property {number} g - Green component (0-1 range)
+ * @property {number} b - Blue component (0-1 range)
+ * @property {number} [a] - Alpha/opacity component (0-1 range, optional)
+ */
+
+/**
+ * Creates a default ColorInfo object (black)
+ * @param {number} [r=0] - Red component (0-1)
+ * @param {number} [g=0] - Green component (0-1)
+ * @param {number} [b=0] - Blue component (0-1)
+ * @param {number} [a=1] - Alpha component (0-1)
+ * @returns {ColorInfo}
+ */
+export function createColorInfo(r = 0, g = 0, b = 0, a = 1) {
+  return { r, g, b, a };
+}
+
+/**
+ * @typedef {Object} TextItemWithColor
+ * @description Extended TextItem with reliable color information from operator list extraction
+ * @extends TextItem
+ * @property {string} text - The text string content
+ * @property {number} x - X position from left edge (PDF points)
+ * @property {number} y - Y position from bottom edge (PDF points)
+ * @property {number} width - Text width in PDF points
+ * @property {number} height - Text height in PDF points
+ * @property {number} fontSize - Font size derived from transform matrix
+ * @property {string} fontName - Internal font reference ID
+ * @property {'normal'|'bold'|'italic'|'bolditalic'} fontStyle - Detected font style
+ * @property {number} pageIndex - Zero-based page index
+ * @property {number[]} transform - 6-element transformation matrix
+ * @property {ColorInfo} color - Text color information (reliable, from operator list)
+ * @property {number} charOffsetStart - Start index in concatenated text string
+ * @property {number} charOffsetEnd - End index in concatenated text string
+ * @property {boolean} colorFromOperatorList - True if color was extracted from operator list (reliable)
+ */
+
+// ============================================================================
+// Column Detection Types (for Multi-Column Layout feature)
+// ============================================================================
+
+/**
+ * @typedef {Object} ColumnInfo
+ * @description Detected column in a page layout
+ * @property {number} index - Zero-based column index (left to right)
+ * @property {number} id - Unique identifier for this column
+ * @property {number} x - Left edge X position (PDF points), alias for leftBound
+ * @property {number} leftBound - Left edge X position (PDF points)
+ * @property {number} rightBound - Right edge X position (PDF points)
+ * @property {number} width - Column width in PDF points
+ * @property {number} gapToNext - Gap to next column (0 if last column)
+ * @property {import('./pdfTypes').TextItem[]} textItems - Text items assigned to this column
+ */
+
+/**
+ * Creates a default ColumnInfo object
+ * @param {number} [index=0] - Column index
+ * @param {number} [x=0] - Left edge X position
+ * @param {number} [width=0] - Column width
+ * @returns {ColumnInfo}
+ */
+export function createColumnInfo(index = 0, x = 0, width = 0) {
+  return {
+    index,
+    id: index,
+    x,
+    leftBound: x,
+    rightBound: x + width,
+    width,
+    gapToNext: 0,
+    textItems: []
+  };
+}
+
+/**
+ * @typedef {Object} ColumnLayout
+ * @description Multi-column layout information for a page
+ * @property {number} pageNumber - One-based page number
+ * @property {number} columnCount - Number of detected columns (1-4)
+ * @property {ColumnInfo[]} columns - Column definitions
+ * @property {number} gutterWidth - Average gap between columns in PDF points
+ * @property {boolean} isMultiColumn - True if more than 1 column detected
+ */
+
+/**
+ * Creates a default single-column layout
+ * @param {number} pageWidth - Page width in PDF points
+ * @param {number} [pageNumber=1] - One-based page number
+ * @returns {ColumnLayout}
+ */
+export function createDefaultColumnLayout(pageWidth, pageNumber = 1) {
+  return {
+    pageNumber,
+    columnCount: 1,
+    columns: [{
+      index: 0,
+      id: 0,
+      x: 0,
+      leftBound: 0,
+      rightBound: pageWidth,
+      width: pageWidth,
+      gapToNext: 0,
+      textItems: []
+    }],
+    gutterWidth: 0,
+    isMultiColumn: false
+  };
+}
+
+// ============================================================================
+// Font Embedding Types (for Custom Font Embedding feature)
+// ============================================================================
+
+/**
+ * @typedef {Object} FontEmbedConfig
+ * @description Configuration for embedding a custom font into a PDF
+ * @property {string} fontName - Name of the font family (e.g., 'NotoSans')
+ * @property {Uint8Array|null} fontBytes - Font file bytes (TTF format)
+ * @property {string} fallbackFont - Fallback standard font if embedding fails (e.g., 'Helvetica')
+ * @property {'regular'|'bold'|'italic'|'bolditalic'} [style='regular'] - Font style/weight
+ * @property {boolean} [subset=true] - Whether to subset the font (reduces file size)
+ */
+
+/**
+ * Creates a default FontEmbedConfig object
+ * @param {string} [fontName='NotoSans'] - Font family name
+ * @param {Uint8Array|null} [fontBytes=null] - Font file bytes
+ * @param {string} [fallbackFont='Helvetica'] - Fallback font name
+ * @returns {FontEmbedConfig}
+ */
+export function createFontEmbedConfig(fontName = 'NotoSans', fontBytes = null, fallbackFont = 'Helvetica') {
+  return {
+    fontName,
+    fontBytes,
+    fallbackFont,
+    style: 'regular',
+    subset: true
+  };
+}
+
+/**
+ * @typedef {Object} ColumnDetectionConfig
+ * @description Configuration options for column detection algorithm
+ * @property {number} minColumnWidth - Minimum column width in PDF points (default: 100)
+ * @property {number} minGutterWidth - Minimum gap to consider as column break (default: 20)
+ * @property {number} maxColumns - Maximum number of columns to detect (default: 4)
+ * @property {number} minItemsPerColumn - Minimum text items for valid column (default: 5)
+ */
+
+/**
+ * Creates default column detection configuration
+ * @returns {ColumnDetectionConfig}
+ */
+export function createColumnDetectionConfig() {
+  return {
+    minColumnWidth: 100,
+    minGutterWidth: 20,
+    maxColumns: 4,
+    minItemsPerColumn: 5
+  };
+}
