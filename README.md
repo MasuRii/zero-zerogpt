@@ -20,9 +20,11 @@
 
 Zero-ZeroGPT is a demonstration application that showcases how replacing standard spaces with various Unicode space characters can affect the detection of AI-generated text by common AI detection tools like **GPTZero** and **ZeroGPT**. This project looks to explore the limitations of current AI detection methods and promote discussion about more robust processing techniques.
 
+> **Note:** This version is a fork of the original project. It has been enhanced by **MasuRii** to include full **PDF document support**, whereas the original application only supported plain and rich text.
+
 ## Live Demo
 
-Experience Zero-ZeroGPT in action: [https://oct4pie.github.io/zero-zerogpt](https://oct4pie.github.io/zero-zerogpt)
+Experience Zero-ZeroGPT in action (deployed via GitHub Pages): [https://oct4pie.github.io/zero-zerogpt](https://oct4pie.github.io/zero-zerogpt)
 
 ## AI Detection Approach
 
@@ -41,6 +43,8 @@ AI detection tools generally tokenize text based on standard spaces. By replacin
 3. **Pattern Interference**: Unicode spaces can disrupt the detection model's ability to identify typical text patterns.
 
 ## PDF Support
+
+Developed by **MasuRii**, this fork introduces robust PDF capabilities to Zero-ZeroGPT. While the original tool was limited to text and rich text inputs, this version allows for full document processing.
 
 Zero-ZeroGPT includes comprehensive PDF processing capabilities, powered by **pdfjs-dist** for extraction and **pdf-lib** for high-fidelity generation.
 

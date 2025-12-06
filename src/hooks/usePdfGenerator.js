@@ -4,6 +4,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import fontManager from '../utils/fontManager';
 import { embedCustomFont, getRequiredFontsForText } from '../utils/fontLoader';
+import { layoutTextAtPosition } from '../utils/textLayoutEngine';
 
 /**
  * Normalize problematic Unicode spaces to regular spaces for PDF rendering.
@@ -564,25 +565,75 @@ export const usePdfGenerator = () => {
               
               // Only draw if there's text to render
               if (textToRender.length > 0) {
-                // For multi-font Unicode support, we may need to split text and use different fonts
-                // For now, try to render the whole string with the item's font
-                // If we have fontsByFamily, we could implement character-by-character rendering
-                // but that would be much slower - for now, use the primary Unicode font
+                // Create layout constraints from page layout
+                const constraints = {
+                  maxWidth: pageLayout.width - (pageLayout.margins?.left || 72) - (pageLayout.margins?.right || 72),
+                  leftMargin: pageLayout.margins?.left || 72,
+                  rightMargin: pageLayout.margins?.right || 72,
+                  pageWidth: pageLayout.width,
+                  pageHeight: pageLayout.height
+                };
                 
-                // Draw text at the exact position
-                // Apply text color - rgb() takes values in 0-1 range
-                // Colors extracted via colorExtractor are already in correct range
-                page.drawText(textToRender, {
-                  x: x,
-                  y: y,
-                  size: fontSize,
-                  font: font,
-                  color: rgb(
-                    Math.max(0, Math.min(1, color.r || 0)),
-                    Math.max(0, Math.min(1, color.g || 0)),
-                    Math.max(0, Math.min(1, color.b || 0))
-                  ),
-                });
+                // Layout text with overflow handling
+                const layoutResult = layoutTextAtPosition(
+                  textToRender,
+                  font,
+                  fontSize,
+                  x,
+                  constraints,
+                  { overflowStrategy: 'wrap', lineHeight: 1.2 }
+                );
+                
+                // Calculate line height for wrapped text
+                let lineHeightPx;
+                try {
+                  lineHeightPx = (typeof font.heightAtSize === 'function'
+                    ? font.heightAtSize(layoutResult.fontSize)
+                    : layoutResult.fontSize * 1.2) * 1.2;
+                } catch (err) {
+                  lineHeightPx = layoutResult.fontSize * 1.2;
+                }
+                
+                // Render each line
+                let currentY = y;
+                
+                for (let lineIndex = 0; lineIndex < layoutResult.lines.length; lineIndex++) {
+                  const line = layoutResult.lines[lineIndex];
+                  
+                  // Check if we need to stop for wrapped lines going below page
+                  if (lineIndex > 0 && currentY - lineHeightPx < (pageLayout.margins?.bottom || 72)) {
+                    // Wrapped text extends beyond page bottom margin
+                    console.warn('Wrapped text extends beyond page bottom margin');
+                    break;
+                  }
+                  
+                  // Draw text line at the position
+                  if (line.text.length > 0) {
+                    page.drawText(line.text, {
+                      x: x,
+                      y: currentY,
+                      size: layoutResult.fontSize,
+                      font: font,
+                      color: rgb(
+                        Math.max(0, Math.min(1, color.r || 0)),
+                        Math.max(0, Math.min(1, color.g || 0)),
+                        Math.max(0, Math.min(1, color.b || 0))
+                      ),
+                    });
+                  }
+                  
+                  // Move down for next line (PDF Y is bottom-up)
+                  currentY -= lineHeightPx;
+                }
+                
+                // Log overflow warning for debugging
+                if (layoutResult.overflow) {
+                  console.log(`Text overflow handled with strategy: ${layoutResult.strategy}`, {
+                    originalText: textToRender.substring(0, 50),
+                    lines: layoutResult.lines.length,
+                    fontSize: layoutResult.fontSize
+                  });
+                }
               }
             } catch (itemErr) {
               console.warn(`Failed to render text item: ${itemErr.message}`);
@@ -603,6 +654,15 @@ export const usePdfGenerator = () => {
             const lines = textForPage.split('\n');
             let y = pageHeight - margin;
             
+            // Create layout constraints for fallback rendering
+            const fallbackConstraints = {
+              maxWidth: pageLayout.width - margin * 2,
+              leftMargin: margin,
+              rightMargin: margin,
+              pageWidth: pageLayout.width,
+              pageHeight: pageHeight
+            };
+            
             for (const line of lines) {
               if (y < margin) break;
               
@@ -611,17 +671,37 @@ export const usePdfGenerator = () => {
               if (!hasUnicodeSupport) {
                 lineToRender = sanitizeForWinAnsi(lineToRender);
               }
-              if (lineToRender.length > 0) {
-                page.drawText(lineToRender, {
-                  x: margin,
-                  y: y,
-                  size: fontSize,
-                  font: defaultFont,
-                  color: rgb(0, 0, 0),
-                });
-              }
               
-              y -= lineHeight;
+              if (lineToRender.length > 0) {
+                // Use layout engine for fallback text as well
+                const layoutResult = layoutTextAtPosition(
+                  lineToRender,
+                  defaultFont,
+                  fontSize,
+                  margin,
+                  fallbackConstraints,
+                  { overflowStrategy: 'wrap', lineHeight: 1.5 }
+                );
+                
+                // Render each wrapped line
+                for (let i = 0; i < layoutResult.lines.length; i++) {
+                  if (y < margin) break;
+                  
+                  const wrappedLine = layoutResult.lines[i];
+                  if (wrappedLine.text.length > 0) {
+                    page.drawText(wrappedLine.text, {
+                      x: margin,
+                      y: y,
+                      size: layoutResult.fontSize,
+                      font: defaultFont,
+                      color: rgb(0, 0, 0),
+                    });
+                  }
+                  y -= lineHeight;
+                }
+              } else {
+                y -= lineHeight;
+              }
             }
           }
         }

@@ -542,3 +542,131 @@ export function createColumnDetectionConfig() {
     minItemsPerColumn: 5
   };
 }
+
+// ============================================================================
+// Text Layout Types (for Text Overflow Solution)
+// ============================================================================
+
+/**
+ * @typedef {Object} TextMeasurement
+ * @description Result of measuring text dimensions
+ * @property {number} width - Total text width in PDF points
+ * @property {number} height - Text height in PDF points
+ * @property {number} charCount - Number of characters
+ * @property {number[]} charWidths - Width of each character
+ */
+
+/**
+ * Creates a default TextMeasurement
+ * @returns {TextMeasurement}
+ */
+export function createTextMeasurement() {
+  return {
+    width: 0,
+    height: 0,
+    charCount: 0,
+    charWidths: []
+  };
+}
+
+/**
+ * @typedef {Object} LayoutConstraints
+ * @description Page constraints for text layout
+ * @property {number} maxWidth - Maximum allowed width
+ * @property {number} leftMargin - Left margin position
+ * @property {number} rightMargin - Right margin position (distance from right edge)
+ * @property {number} pageWidth - Total page width
+ * @property {number} pageHeight - Total page height
+ */
+
+/**
+ * Creates LayoutConstraints from a PageLayout
+ * @param {PageLayout} pageLayout - Page layout information
+ * @returns {LayoutConstraints}
+ */
+export function createLayoutConstraints(pageLayout) {
+  const margins = pageLayout?.margins || { left: 72, right: 72, top: 72, bottom: 72 };
+  return {
+    maxWidth: (pageLayout?.width || 595.28) - (margins.left || 72) - (margins.right || 72),
+    leftMargin: margins.left || 72,
+    rightMargin: margins.right || 72,
+    pageWidth: pageLayout?.width || 595.28,
+    pageHeight: pageLayout?.height || 841.89
+  };
+}
+
+/**
+ * @typedef {Object} WrappedLine
+ * @description A single line of wrapped text
+ * @property {string} text - Text content for this line
+ * @property {number} width - Width of this line in points
+ * @property {number} startCharIndex - Start index in original text
+ * @property {number} endCharIndex - End index in original text (exclusive)
+ */
+
+/**
+ * Creates a default WrappedLine
+ * @param {string} [text=''] - Text content
+ * @returns {WrappedLine}
+ */
+export function createWrappedLine(text = '') {
+  return {
+    text,
+    width: 0,
+    startCharIndex: 0,
+    endCharIndex: text.length
+  };
+}
+
+/**
+ * @typedef {Object} TextLayoutResult
+ * @description Result of text layout with overflow handling
+ * @property {'normal'|'wrapped'|'scaled'|'truncated'} strategy - Strategy used
+ * @property {WrappedLine[]} lines - Lines to render
+ * @property {number} fontSize - Final font size (may be scaled)
+ * @property {number} totalHeight - Total height of all lines
+ * @property {boolean} overflow - True if text was modified to fit
+ */
+
+/**
+ * Creates a default TextLayoutResult
+ * @param {string} [text=''] - Original text
+ * @param {number} [fontSize=12] - Font size
+ * @returns {TextLayoutResult}
+ */
+export function createTextLayoutResult(text = '', fontSize = 12) {
+  return {
+    strategy: 'normal',
+    lines: [{
+      text,
+      width: 0,
+      startCharIndex: 0,
+      endCharIndex: text.length
+    }],
+    fontSize,
+    totalHeight: fontSize * 1.2,
+    overflow: false
+  };
+}
+
+/**
+ * @typedef {Object} TextLayoutOptions
+ * @description Options for text layout
+ * @property {'wrap'|'scale'|'truncate'} [overflowStrategy='wrap'] - How to handle overflow
+ * @property {number} [lineHeight=1.2] - Line height multiplier
+ * @property {number} [minFontSize=6] - Minimum font size for scaling
+ * @property {boolean} [preserveWhitespace=false] - Preserve leading/trailing whitespace
+ */
+
+/**
+ * Creates default TextLayoutOptions
+ * @returns {TextLayoutOptions}
+ */
+export function createTextLayoutOptions() {
+  return {
+    overflowStrategy: 'wrap',
+    lineHeight: 1.2,
+    minFontSize: 6,
+    preserveWhitespace: false
+  };
+}
